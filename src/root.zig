@@ -14,6 +14,7 @@ const Parser = @import("sql/Parser.zig");
 const Plan = planner.Plan;
 const Planner = planner.Planner;
 
+/// Execute a single statement
 pub fn execute_stmt(
     io: std.Io,
     gpa: std.mem.Allocator,
@@ -21,9 +22,11 @@ pub fn execute_stmt(
     catalog_cache: *catalog.Cache,
     query: []const u8,
 ) !void {
+    // Temporary arena for this statement
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
+    // Initialize stderr and stdout writers
     var bufferStderr: [512]u8 = undefined;
     var bufferStdout: [512]u8 = undefined;
     const stderr_locked = try io.lockStderr(&bufferStderr, null);
@@ -35,12 +38,14 @@ pub fn execute_stmt(
     defer stderr.flush() catch unreachable;
     defer stdout.flush() catch unreachable;
 
+    // Lex the query
     var parser = Parser.init(arena.allocator());
     if (parser.lex(query)) |err| {
         try stderr.print("Error: {}\n", .{err});
         return;
     }
 
+    // Parse the query
     const stmt = parser.parse();
     for (parser.errors.items) |err|
         try stderr.print("{s}\n", .{err});
@@ -55,6 +60,7 @@ pub fn execute_stmt(
     //     std.debug.print("{f}\n", .{formatted});
     // }
 
+    // Plan the parsed query
     var pl = Planner.init(arena.allocator(), catalog_cache);
     const plan = pl.plan(stmt) catch {
         for (pl.errors.items) |err|
@@ -69,6 +75,7 @@ pub fn execute_stmt(
     // );
     // std.debug.print("{f}\n", .{formatted});
 
+    // Form the execution context
     var cxt = Context{
         .alloc = arena.allocator(),
         .catalog_cache = catalog_cache,
@@ -76,11 +83,13 @@ pub fn execute_stmt(
         .db_id = 1,
         .output = stdout,
     };
+    // Execute the query
     Executor.execute(plan, &cxt) catch |err| {
         try stderr.print("Error: {}\n", .{err});
         return;
     };
 
+    // Print output tuples, if any
     for (cxt.data_output.items) |tuple| {
         try stdout.print("{f}\n", .{tuple});
     }

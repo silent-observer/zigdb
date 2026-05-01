@@ -4,6 +4,7 @@ const Io = std.Io;
 const zigdb = @import("zigdb");
 
 pub fn main(init: std.process.Init) !void {
+    // Create the temporary data directory (for testing)
     std.Io.Dir.createDirAbsolute(
         init.io,
         "/tmp/datadir",
@@ -15,32 +16,42 @@ pub fn main(init: std.process.Init) !void {
         }
     };
 
+    // Initialize the catalog table descriptors
     zigdb.catalog.tables.init(init.arena.allocator());
 
+    // Initialize the storage cache
     var storage_cache = zigdb.storage.Cache.init(
         init.gpa,
         init.io,
         "/tmp/datadir",
     );
-    defer storage_cache.deinit();
+    defer storage_cache.deinit(); // Don't forget to deinitialize
 
+    // Build the actual catalog tables (this recreates the database from scratch)
     try zigdb.catalog.Cache.build(init.gpa, &storage_cache, 1);
 
+    // Initialize and rebuild the catalog cache
     var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1);
-    defer catalog_cache.deinit();
+    defer catalog_cache.deinit(); // Don't forget to deinitialize
     try catalog_cache.rebuild(&storage_cache);
 
+    // Create a stdin reader
     var stdin_buffer: [1024]u8 = undefined;
     var stdin_reader = std.Io.File.stdin().readerStreaming(init.io, &stdin_buffer);
 
+    // Storage for the command line
     var line = std.Io.Writer.Allocating.init(init.gpa);
 
     while (true) {
+        // Print prompt
         std.debug.print("> ", .{});
+        // Read one line from stdin to line writer
         _ = try stdin_reader.interface.streamDelimiterEnding(&line.writer, '\n');
+        // Check if it's the exit command
         if (std.ascii.eqlIgnoreCase(line.written(), "exit"))
             break;
 
+        // Execute the query
         try zigdb.execute_stmt(
             init.io,
             init.gpa,
@@ -49,7 +60,9 @@ pub fn main(init: std.process.Init) !void {
             line.written(),
         );
 
+        // Clear the command writer for the next command
         line.clearRetainingCapacity();
+        // Skip newline
         stdin_reader.interface.toss(1);
     }
 }
