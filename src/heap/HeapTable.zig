@@ -1,0 +1,204 @@
+//! Represents a whole heap table.
+//!
+//! The heap table occupies a single data file (split into pages).
+//! The 0th page is always the header page, containing the metadata of the table.
+//! The next pages are HeapPages, containing the actual tuples.
+
+const std = @import("std");
+
+const RawDataFile = @import("../storage/RawDataFile.zig");
+const Page = RawDataFile.Page;
+const storage = @import("../storage.zig");
+const HeapPage = @import("HeapPage.zig");
+const MemTuple = @import("../data/tuple.zig").MemTuple;
+const ids = @import("../ids.zig");
+
+const HeapTable = @This();
+
+cache: *storage.Cache,
+table_id: ids.FullTableId,
+
+/// The fixed-size header, placed at the start of the 0th page.
+pub const Header = extern struct {
+    // 8-byte magic number to identify the file type
+    magic_value: [8]u8 = Magic,
+    // Id of the table
+    table_id: ids.FullTableId,
+    // Total number of tuples in the table
+    tuples: u64,
+    // Total number of pages in the table (including the header page)
+    pages: u16,
+    // Reserved space
+    padding: [6]u8 = std.mem.zeroes([6]u8),
+
+    const Magic: [8]u8 = .{ 'Z', 'D', 'B', '_', 'H', 'E', 'A', 'P' };
+
+    /// Obtain a header from raw page (and check the magic number)
+    pub fn fromPage(page: *Page.Data) *Header {
+        const h: *Header = @ptrCast(page);
+        std.debug.assert(std.meta.eql(h.magic_value, Magic));
+        std.debug.assert(h.pages > 0);
+        return h;
+    }
+
+    /// Write the header page
+    pub fn writePage(h: *const Header, page: *Page.Data) void {
+        @memset(&page.d, 0);
+        const dest: *Header = @ptrCast(&page.d);
+        dest.* = h.*;
+    }
+};
+
+/// Initializes a heap table handle.
+/// Does not actually write anything to disk.
+pub fn init(cache: *storage.Cache, table_id: ids.FullTableId) HeapTable {
+    return .{
+        .cache = cache,
+        .table_id = table_id,
+    };
+}
+
+/// Create a file for a new heap table.
+/// Only initializes its 0th page.
+pub fn create(self: HeapTable) !void {
+    const page = try self.cache.getWriteable(.{
+        .file = self.table_id,
+        .page = 0,
+    });
+    defer self.cache.unlock(page);
+
+    const header = Header{
+        .table_id = self.table_id,
+        .tuples = 0,
+        .pages = 1,
+    };
+    header.writePage(page.page);
+}
+
+/// Truncation is actually equivalent to creating a new heap table.
+pub fn truncate(self: HeapTable) !void {
+    try self.create();
+}
+
+/// Adds a new page to the heap table.
+pub fn addPage(self: HeapTable) !Page.Id {
+    // Obtain the header page
+    const page = try self.cache.getWriteable(.{
+        .file = self.table_id,
+        .page = 0,
+    });
+    defer self.cache.unlock(page);
+
+    // Increase the number of pages
+    const header = Header.fromPage(page.page);
+    header.pages += 1;
+
+    const page_id: Page.Id = @intCast(header.pages - 1);
+
+    // Write the new page (zero-initialized)
+    const new_page = try self.cache.getWriteable(.{
+        .file = self.table_id,
+        .page = page_id,
+    });
+    defer self.cache.unlock(new_page);
+    @memset(&new_page.page.d, 0);
+
+    return page_id;
+}
+
+/// Read the header of the HeapTable.
+pub fn readHeader(self: HeapTable) !Header {
+    const page = try self.cache.get(.{
+        .file = self.table_id,
+        .page = 0,
+    });
+    defer self.cache.unlock(page);
+
+    return Header.fromPage(page.page).*;
+}
+
+/// Add a new tuple to the HeapTable.
+pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
+    const header = try self.readHeader();
+
+    // Go through pages to find a page that can fit this new tuple.
+    // Create a new page if no pages have enough free space.
+    const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
+        // Read the page
+        const raw_page = try self.cache.get(.{
+            .file = self.table_id,
+            .page = @intCast(page_id),
+        });
+        defer self.cache.unlock(raw_page);
+
+        // Check if the tuple would fit
+        const page = HeapPage.parse(raw_page.page);
+        if (page.fits(tuple))
+            break :page_id @intCast(page_id);
+    } else try self.addPage();
+
+    // Write the tuple to the page
+    {
+        const raw_page = try self.cache.getWriteable(.{
+            .file = self.table_id,
+            .page = page_id,
+        });
+        defer self.cache.unlock(raw_page);
+        var page = HeapPage.parse(raw_page.page);
+
+        page.add(tuple);
+    }
+
+    // Update the number of tuples on the header page
+    {
+        const page = try self.cache.getWriteable(.{
+            .file = self.table_id,
+            .page = 0,
+        });
+        defer self.cache.unlock(page);
+        const h = Header.fromPage(page.page);
+        h.tuples += 1;
+    }
+}
+
+/// Update the tuple directly on the page.
+/// Care must be taken to ensure that the new data isn't bigger in size
+/// than old data.
+pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
+    const header = try self.readHeader();
+
+    // How many tuples we already skipped
+    var counter: u64 = 0;
+    // Go through pages to find the tuple
+    const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
+        // Read the page
+        const raw_page = try self.cache.get(.{
+            .file = self.table_id,
+            .page = @intCast(page_id),
+        });
+        defer self.cache.unlock(raw_page);
+
+        const page = HeapPage.parse(raw_page.page);
+        if (i < counter + page.offsets.len)
+            // If the tuple index is on this page, we're done
+            break :page_id @intCast(page_id)
+        else
+            // Otherwise skip the tuples on this page and go to next one
+            counter += page.offsets.len;
+    } else @panic("Updating non-existent tuple");
+
+    // Actually update the tuple on the page
+    {
+        const raw_page = try self.cache.getWriteable(.{
+            .file = self.table_id,
+            .page = page_id,
+        });
+        defer self.cache.unlock(raw_page);
+        var page = HeapPage.parse(raw_page.page);
+
+        // Check that we can actually update the tuple
+        if (!page.canUpdateInPlace(@intCast(i - counter), tuple))
+            @panic("Cannot actually update in place!");
+        page.updateInPlace(@intCast(i - counter), tuple);
+    }
+}

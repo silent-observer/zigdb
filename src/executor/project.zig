@@ -1,0 +1,46 @@
+//! This is the executor for Project DataNode
+//! This performs a projection, evaluating a list of scalar expressions
+//! for every tuple that passes through it.
+//!
+//! This executor has no special internal state.
+const std = @import("std");
+
+const Context = @import("Context.zig");
+const Plan = @import("../planner.zig").Plan;
+const data = @import("../data.zig");
+const oom = @import("../utils.zig").oom;
+const Executor = @import("Executor.zig");
+const scalar = @import("scalar.zig");
+
+/// Initialize the Project DataNode
+pub fn init(plan: *Plan.DataNode, cxt: *Context) !void {
+    std.debug.assert(plan.action == .project);
+    // Simply recurse to child
+    try Executor.initDataNode(plan.action.project.input, cxt);
+}
+
+/// Initialize the Project DataNode
+pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
+    std.debug.assert(plan.action == .project);
+    // Simply recurse to child
+    Executor.deinitDataNode(plan.action.project.input, cxt);
+}
+
+/// Fetch one tuple from Project DataNode
+pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
+    std.debug.assert(plan.action == .project);
+    // Get one tuple from child
+    const input = try Executor.execDataNode(plan.action.project.input, cxt);
+    // If the child is done, we are done too
+    if (input == null) return null;
+
+    // Build our new tuple
+    var b = data.MemTuple.Builder.init(cxt.alloc, plan.descr);
+    // Go through our expressions
+    for (plan.action.project.exprs.items) |expr| {
+        // Evaluate each one and add the result to the output tuple
+        const v = scalar.eval(&expr, input.?);
+        b.pushValue(v);
+    }
+    return b.finalize();
+}

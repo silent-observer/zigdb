@@ -1,0 +1,7 @@
+pub const Cache = @import("catalog/CatalogCache.zig");
+pub const tables = @import("catalog/tables.zig");
+pub const TableId = tables.TableId;
+pub const SystemAttribute = tables.SystemAttribute;
+pub const SequenceId = tables.SequenceId;
+pub const Entry = tables.Entry;
+pub const Attr = tables.Attr;
