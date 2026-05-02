@@ -22,7 +22,7 @@ const max_pages_per_file = 1024;
 const Address = struct {
     page_id: ids.FullPageId,
     byte_index: u16,
-    bit_shift: u8,
+    bit_shift: u3,
 };
 
 pub fn init(storage_cache: *storage.Cache) TransactionLog {
@@ -60,8 +60,8 @@ pub fn set(self: *TransactionLog, tid: ids.TransactionId, status: TransactionSta
     defer self.storage_cache.unlock(page);
 
     const byte = &page.page.d[addr.byte_index];
-    const mask: u8 = 0x3 << addr.bit_shift;
-    byte.* = (byte.* & ~mask) | (@intFromEnum(status) << addr.bit_shift);
+    const mask: u8 = @as(u8, 0x3) << addr.bit_shift;
+    byte.* = (byte.* & ~mask) | (@as(u8, @intFromEnum(status)) << addr.bit_shift);
 }
 
 pub fn next(self: *TransactionLog) ids.TransactionId {

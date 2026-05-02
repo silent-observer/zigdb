@@ -15,6 +15,13 @@ const Parser = @import("sql/Parser.zig");
 const Plan = planner.Plan;
 const Planner = planner.Planner;
 
+pub const Error = error{
+    LexerError,
+    ParserError,
+    PlannerError,
+    ExecutorError,
+};
+
 /// Execute a single statement
 pub fn execute_stmt(
     io: std.Io,
@@ -44,7 +51,7 @@ pub fn execute_stmt(
     var parser = Parser.init(arena.allocator());
     if (parser.lex(query)) |err| {
         try stderr.print("Error: {}\n", .{err});
-        return;
+        return Error.LexerError;
     }
 
     // Parse the query
@@ -52,7 +59,7 @@ pub fn execute_stmt(
     for (parser.errors.items) |err|
         try stderr.print("{s}\n", .{err});
     if (parser.errors.items.len > 0)
-        return;
+        return Error.ParserError;
 
     // {
     //     const formatted = std.json.fmt(
@@ -67,10 +74,8 @@ pub fn execute_stmt(
     const plan = pl.plan(stmt) catch {
         for (pl.errors.items) |err|
             try stderr.print("{s}\n", .{err});
-        return;
+        return Error.PlannerError;
     };
-
-    const tid = transaction_log.next();
 
     // std.debug.print("Successfully planned\n", .{});
     // const formatted = std.json.fmt(
@@ -79,24 +84,31 @@ pub fn execute_stmt(
     // );
     // std.debug.print("{f}\n", .{formatted});
 
-    // Form the execution context
-    var cxt = Context{
-        .alloc = arena.allocator(),
-        .catalog_cache = catalog_cache,
-        .storage_cache = storage_cache,
-        .transaction_log = transaction_log,
-        .db_id = 1,
-        .tid = tid,
-        .output = stdout,
-    };
-    // Execute the query
-    Executor.execute(plan, &cxt) catch |err| {
-        try stderr.print("Error: {}\n", .{err});
-        return;
-    };
+    {
+        const tid = transaction_log.next();
+        errdefer transaction_log.set(tid, .aborted) catch {};
 
-    // Print output tuples, if any
-    for (cxt.data_output.items) |tuple| {
-        try stdout.print("{f}\n", .{tuple});
+        // Form the execution context
+        var cxt = Context{
+            .alloc = arena.allocator(),
+            .catalog_cache = catalog_cache,
+            .storage_cache = storage_cache,
+            .transaction_log = transaction_log,
+            .db_id = 1,
+            .tid = tid,
+            .output = stdout,
+        };
+        // Execute the query
+        Executor.execute(plan, &cxt) catch |err| {
+            try stderr.print("Error: {}\n", .{err});
+            return Error.ExecutorError;
+        };
+
+        // Print output tuples, if any
+        for (cxt.data_output.items) |tuple| {
+            try stdout.print("{f}\n", .{tuple});
+        }
+
+        try transaction_log.set(tid, .committed);
     }
 }
