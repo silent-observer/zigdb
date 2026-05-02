@@ -20,17 +20,21 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void
         return Context.Error.MalformedData;
     }
     // Fetch the next table id from the sequence
-    const table_id: ids.TableId = seq_row.?.seq_val;
+    const table_id: ids.TableId = try catalog.Sequence.init(
+        .zdb_seq_table_id,
+        cxt.catalog_cache,
+        cxt.storage_cache,
+    ).next(cxt.tid);
 
     // Increment the sequence and update the catalog
     seq_row.?.seq_val += 1;
-    try seq_scanner.updateLast(cxt.storage_cache, seq_row.?);
+    try seq_scanner.updateLast(cxt.storage_cache, seq_row.?, cxt.tid);
 
     // Add a row to zdb_rels catalog table
     try cxt.catalog_cache.catalog.zdb_rels.add(cxt.storage_cache, .{
         .rel_id = table_id,
         .rel_name = stmt.name,
-    });
+    }, cxt.tid);
 
     // Go through all attributes
     const slice = stmt.descr.attrs.slice();
@@ -41,7 +45,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void
             .attr_rel_id = table_id,
             .attr_name = name,
             .attr_type = @intFromEnum(t),
-        });
+        }, cxt.tid);
     }
 
     // Update all descriptors in the catalog

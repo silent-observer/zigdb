@@ -27,13 +27,16 @@ pub fn main(init: std.process.Init) !void {
     );
     defer storage_cache.deinit(); // Don't forget to deinitialize
 
-    // Build the actual catalog tables (this recreates the database from scratch)
-    try zigdb.catalog.Cache.build(init.gpa, &storage_cache, 1);
-
     // Initialize and rebuild the catalog cache
-    var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1);
+    var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1, &storage_cache);
     defer catalog_cache.deinit(); // Don't forget to deinitialize
-    try catalog_cache.rebuild(&storage_cache);
+
+    // Build the actual catalog tables (this recreates the database from scratch)
+    try catalog_cache.build();
+
+    var transaction_log = zigdb.TransactionLog.init(&storage_cache);
+
+    //try catalog_cache.rebuild();
 
     // Create a stdin reader
     var stdin_buffer: [1024]u8 = undefined;
@@ -41,6 +44,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Storage for the command line
     var line = std.Io.Writer.Allocating.init(init.gpa);
+    defer line.deinit();
 
     while (true) {
         // Print prompt
@@ -57,8 +61,10 @@ pub fn main(init: std.process.Init) !void {
             init.gpa,
             &storage_cache,
             &catalog_cache,
+            &transaction_log,
             line.written(),
         );
+        try storage_cache.flush();
 
         // Clear the command writer for the next command
         line.clearRetainingCapacity();

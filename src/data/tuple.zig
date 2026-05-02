@@ -47,7 +47,7 @@ const oom = @import("../utils.zig").oom;
 /// Pointer to a memory tuple
 /// Since memory tuple size is dynamic, all operations with memory tuples
 /// must use MemTuple (the pointer).
-pub const MemTuple = extern struct {
+pub const MemTuple = struct {
     ptr: *Data,
 
     pub const Header = extern struct {
@@ -82,7 +82,7 @@ pub const MemTuple = extern struct {
         const data: [*]u8 = @ptrCast(&offsets[n + 1]);
         return .{
             .h = &self.ptr.h,
-            .offsets = offsets[0..n],
+            .offsets = offsets[0 .. n + 1],
             .data = data[0..offsets[n]],
         };
     }

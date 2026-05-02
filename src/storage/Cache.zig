@@ -162,6 +162,7 @@ pub fn flush(self: *Cache) !void {
             const file = self.files.get(e.key_ptr.file) orelse unreachable;
             const data = self.pages.getPtr(e.key_ptr.*) orelse unreachable;
             try file.write(e.key_ptr.page, data);
+            e.value_ptr.dirty = false;
         }
     }
 }

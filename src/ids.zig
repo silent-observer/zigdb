@@ -9,14 +9,43 @@ pub const TableId = u32;
 pub const FullTableId = extern struct {
     db: DatabaseId,
     table: TableId,
+
+    pub fn fullFileId(self: FullTableId) FullFileId {
+        return .{ .heap = self };
+    }
 };
-/// Files correspond 1-to-1 to tables.
-pub const FullFileId = FullTableId;
+pub const HeapFileId = TableId;
+
+pub const TLogFileId = u32;
+
+pub const FullFileId = union(enum) {
+    heap: FullTableId,
+    tlog: TLogFileId,
+};
 
 /// Id of page inside a data file
 pub const PageId = u32;
 /// Full Id sufficient to identify a specific page
-pub const FullPageId = extern struct {
+pub const FullHeapPageId = extern struct {
+    table: FullTableId,
+    page: PageId,
+
+    pub fn fullPageId(self: FullHeapPageId) FullPageId {
+        return .{
+            .file = .{ .heap = self.file },
+            .page = self.page,
+        };
+    }
+};
+
+pub const FullPageId = struct {
     file: FullFileId,
     page: PageId,
+};
+
+pub const TransactionId = enum(u32) {
+    invalid = 0,
+    frozen = 1,
+    start = 32,
+    _,
 };

@@ -8,6 +8,7 @@ const storage = @import("../storage.zig");
 const HeapTable = @import("HeapTable.zig");
 const HeapPage = @import("HeapPage.zig");
 const MemTuple = @import("../data/tuple.zig").MemTuple;
+const ExtendedMemTuple = HeapPage.ExtendedMemTuple;
 const t = @import("../data/types.zig");
 const ids = @import("../ids.zig");
 const oom = @import("../utils.zig").oom;
@@ -66,7 +67,7 @@ fn advanceToNonEmpty(self: *HeapScanner) !bool {
             std.debug.assert(self.parsed_page == null);
 
             self.page = try self.cache.get(.{
-                .file = self.table_id,
+                .file = self.table_id.fullFileId(),
                 .page = self.page_id,
             });
             self.parsed_page = HeapPage.parse(self.page.?.page);
@@ -101,7 +102,7 @@ fn advanceOne(self: *HeapScanner) !bool {
 }
 
 /// Get the next tuple, allocating it with the given Allocator.
-pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?MemTuple {
+pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?ExtendedMemTuple {
     // Ensure we have a valid non-empty page
     if (!try self.advanceToNonEmpty())
         return null;

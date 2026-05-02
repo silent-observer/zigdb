@@ -8,6 +8,7 @@ pub const catalog = @import("catalog.zig");
 const planner = @import("planner.zig");
 const Executor = @import("executor/Executor.zig");
 const Context = @import("executor/Context.zig");
+pub const TransactionLog = @import("transactions/TransactionLog.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");
@@ -20,6 +21,7 @@ pub fn execute_stmt(
     gpa: std.mem.Allocator,
     storage_cache: *storage.Cache,
     catalog_cache: *catalog.Cache,
+    transaction_log: *TransactionLog,
     query: []const u8,
 ) !void {
     // Temporary arena for this statement
@@ -68,6 +70,8 @@ pub fn execute_stmt(
         return;
     };
 
+    const tid = transaction_log.next();
+
     // std.debug.print("Successfully planned\n", .{});
     // const formatted = std.json.fmt(
     //     plan,
@@ -80,7 +84,9 @@ pub fn execute_stmt(
         .alloc = arena.allocator(),
         .catalog_cache = catalog_cache,
         .storage_cache = storage_cache,
+        .transaction_log = transaction_log,
         .db_id = 1,
+        .tid = tid,
         .output = stdout,
     };
     // Execute the query

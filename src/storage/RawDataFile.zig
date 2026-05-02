@@ -33,11 +33,29 @@ pub fn open(io: Io, base_path: []const u8, id: Id) !RawDataFile {
     var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
     const base_dir = try Io.Dir.openDirAbsolute(io, base_path, .{});
-    const db_dir_path = std.fmt.allocPrint(alloc.allocator(), "db{}", .{id.db}) catch unreachable;
-    const db_dir = try base_dir.createDirPathOpen(io, db_dir_path, .{});
+    const dir_path = switch (id) {
+        .heap => |table| std.fmt.allocPrint(
+            alloc.allocator(),
+            "db{}",
+            .{table.db},
+        ) catch unreachable,
+        .tlog => "tlog",
+    };
+    const dir = try base_dir.createDirPathOpen(io, dir_path, .{});
 
-    const filename = std.fmt.allocPrint(alloc.allocator(), "{}.data", .{id.table}) catch unreachable;
-    const f = try db_dir.createFile(
+    const filename = switch (id) {
+        .heap => |table| std.fmt.allocPrint(
+            alloc.allocator(),
+            "{}.data",
+            .{table.table},
+        ) catch unreachable,
+        .tlog => |tlog| std.fmt.allocPrint(
+            alloc.allocator(),
+            "{}.tlog",
+            .{tlog},
+        ) catch unreachable,
+    };
+    const f = try dir.createFile(
         io,
         filename,
         .{ .truncate = false, .read = true },

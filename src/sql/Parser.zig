@@ -294,12 +294,12 @@ fn parseCreate(p: *Parser) ast.Statement {
     p.expectKeyword(.table) catch return .err;
     const name = p.parseName() catch return .err;
     p.expectSymbol(.lparen) catch return .err;
-    p.expectSymbol(.rparen) catch return .err;
     const columns =
         p.parseCommaListErr(
             ast.Statement.CreateTable.ColumnDefinition,
             parseColumnDefinition,
         ) catch return .err;
+    p.expectSymbol(.rparen) catch return .err;
     p.expectSymbol(.semi) catch return .err;
     return .{ .create_table = .{
         .name = name,

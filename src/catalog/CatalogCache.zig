@@ -16,6 +16,8 @@ const CatalogCache = @This();
 
 /// Allocator for all the system table data
 gpa: std.mem.Allocator,
+/// Storage cache for accessing tables
+storage_cache: *storage.Cache,
 /// Database id of the database this catalog belongs to
 db_id: ids.DatabaseId,
 /// The actual cache data
@@ -57,7 +59,11 @@ pub const CatalogTables = struct {
 // };
 
 /// Initialize the catalog cache. This does not read anything, the catalog is empty.
-pub fn init(gpa: std.mem.Allocator, db_id: ids.DatabaseId) CatalogCache {
+pub fn init(
+    gpa: std.mem.Allocator,
+    db_id: ids.DatabaseId,
+    storage_cache: *storage.Cache,
+) CatalogCache {
     var catalog: CatalogTables = undefined;
     inline for (std.enums.values(tables.TableId)) |id| {
         @field(catalog, @tagName(id)) = .init(gpa, db_id);
@@ -65,6 +71,7 @@ pub fn init(gpa: std.mem.Allocator, db_id: ids.DatabaseId) CatalogCache {
     return CatalogCache{
         .db_id = db_id,
         .gpa = gpa,
+        .storage_cache = storage_cache,
         .catalog = catalog,
         .descr = .empty,
     };
@@ -82,11 +89,11 @@ pub fn deinit(self: *CatalogCache) void {
 }
 
 /// Update the catalog cache from the actual data on disk.
-pub fn rebuild(self: *CatalogCache, cache: *storage.Cache) !void {
+pub fn rebuild(self: *CatalogCache) !void {
     // Go through all the fields in the CatalogTables struct
     inline for (std.meta.fields(CatalogTables)) |field| {
         // Rebuild each one
-        try @field(self.catalog, field.name).rebuild(cache);
+        try @field(self.catalog, field.name).rebuild(self.storage_cache);
     }
     // Also update the descriptors
     try self.updateDescriptors();
@@ -122,6 +129,10 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
         self.descr.put(self.gpa, rel.rel_id, descr) catch oom();
     }
 }
+
+pub const Error = error{
+    CatalogCorrupted,
+};
 
 /// Type representing a cache for the specific catalog table.
 /// The type is generic so that the row of the table can be
@@ -183,7 +194,7 @@ pub fn Table(comptime id: tables.TableId) type {
 
             // Add all tuples from the catalog table to the cache
             while (try scanner.next(self.arena.allocator())) |tuple| {
-                self.data.append(self.arena.allocator(), tuple) catch oom();
+                self.data.append(self.arena.allocator(), tuple.tuple) catch oom();
             }
         }
 
@@ -287,7 +298,7 @@ pub fn Table(comptime id: tables.TableId) type {
             /// Update the last Row returned by the Scanner
             /// Note: you are not allowed to increase the size of the data in the row,
             /// since the update is performed in place.
-            pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row) !void {
+            pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row, tid: ids.TransactionId) !void {
                 // The previously returned index
                 self.index -= 1;
                 defer self.index += 1; // Restore it afterwards
@@ -299,7 +310,7 @@ pub fn Table(comptime id: tables.TableId) type {
                 try heap.Table.init(cache, .{
                     .db = self.table.db_id,
                     .table = @intFromEnum(id),
-                }).updateInPlace(self.index, tuple);
+                }).updateInPlace(self.index, tuple, tid);
 
                 // Replace the tuple in the cache
                 self.table.data.items[self.index].deinit(self.table.arena.allocator());
@@ -425,7 +436,7 @@ pub fn Table(comptime id: tables.TableId) type {
         }
 
         /// Adds a new row to the catalog table
-        pub fn add(self: *TSelf, cache: *storage.Cache, row: Row) !void {
+        pub fn add(self: *TSelf, cache: *storage.Cache, row: Row, tid: ids.TransactionId) !void {
             const tuple = rowToMemTuple(row, self.arena.allocator());
 
             // Add the row to the heap table
@@ -435,13 +446,45 @@ pub fn Table(comptime id: tables.TableId) type {
                     .db = self.db_id,
                     .table = @intFromEnum(id),
                 },
-            ).addOneTuple(tuple);
+            ).addOneTuple(tuple, tid);
 
             // Add the row to the cache too
             self.data.append(self.arena.allocator(), tuple) catch oom();
         }
     };
 }
+
+pub const Sequence = struct {
+    id: tables.SequenceId,
+    cat: *CatalogCache,
+    cache: *storage.Cache,
+
+    pub fn init(id: tables.SequenceId, cat: *CatalogCache, cache: *storage.Cache) Sequence {
+        return .{
+            .id = id,
+            .cat = cat,
+            .cache = cache,
+        };
+    }
+
+    pub fn next(self: Sequence, tid: ids.TransactionId) !u32 {
+        // Find sequence in the catalog
+        var seq_scanner = self.cat.catalog.zdb_seqs.scan(
+            &.{.seq_id},
+            &.{@intFromEnum(self.id)},
+        );
+        // Get its row
+        var seq_row = seq_scanner.next() orelse return Error.CatalogCorrupted;
+        // Fetch the next table id from the sequence
+        const result = seq_row.seq_val;
+
+        // Increment the sequence and update the catalog
+        seq_row.seq_val += 1;
+        try seq_scanner.updateLast(self.cache, seq_row, tid);
+
+        return result;
+    }
+};
 
 /// Create a new heap table without initializing the cache first.
 fn createRaw(
@@ -469,25 +512,22 @@ fn addRaw(
         .table = @intFromEnum(table_id),
     };
     const tuple = Table(table_id).rowToMemTuple(row, arena);
-    try heap.Table.init(cache, id).addOneTuple(tuple);
+    try heap.Table.init(cache, id).addOneTuple(tuple, .frozen);
 }
 
 /// Create the catalog from scratch
-pub fn build(gpa: std.mem.Allocator, cache: *storage.Cache, db_id: ids.DatabaseId) !void {
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-
+pub fn build(self: *CatalogCache) !void {
     // Create the catalog tables
-    try createRaw(cache, db_id, .zdb_rels);
-    try createRaw(cache, db_id, .zdb_attrs);
-    try createRaw(cache, db_id, .zdb_seqs);
+    try createRaw(self.storage_cache, self.db_id, .zdb_rels);
+    try createRaw(self.storage_cache, self.db_id, .zdb_attrs);
+    try createRaw(self.storage_cache, self.db_id, .zdb_seqs);
 
     // Go through all the tables and fill zdb_rels
     for (std.enums.values(tables.TableId)) |id| {
-        try addRaw(arena.allocator(), cache, db_id, .zdb_rels, .{
+        try self.catalog.zdb_rels.add(self.storage_cache, .{
             .rel_id = @intFromEnum(id),
             .rel_name = @tagName(id),
-        });
+        }, .frozen);
     }
 
     // Go through all the tables and their attributes and fill zdb_attrs
@@ -495,24 +535,26 @@ pub fn build(gpa: std.mem.Allocator, cache: *storage.Cache, db_id: ids.DatabaseI
         const d = tables.descriptor(rel_id);
         const slice = d.attrs.slice();
         for (slice.items(.t), slice.items(.name), 0..) |dbtype, name, i| {
-            try addRaw(arena.allocator(), cache, db_id, .zdb_attrs, .{
+            try self.catalog.zdb_attrs.add(self.storage_cache, .{
                 .attr_rel_id = @intFromEnum(rel_id),
                 .attr_id = @intCast(i),
                 .attr_type = @intFromEnum(dbtype),
                 .attr_name = name,
-            });
+            }, .frozen);
         }
     }
 
     // Create the default sequences and fill zdb_seqs
-    try addRaw(arena.allocator(), cache, db_id, .zdb_seqs, .{
+    try self.catalog.zdb_seqs.add(self.storage_cache, .{
         .seq_id = @intFromEnum(tables.SequenceId.zdb_seq_table_id),
         .seq_name = "zdb_seq_table_id",
         .seq_val = 1000,
-    });
-    try addRaw(arena.allocator(), cache, db_id, .zdb_seqs, .{
+    }, .frozen);
+    try self.catalog.zdb_seqs.add(self.storage_cache, .{
         .seq_id = @intFromEnum(tables.SequenceId.zdb_seq_seq_id),
         .seq_name = "zdb_seq_seq_id",
         .seq_val = 1000,
-    });
+    }, .frozen);
+
+    try self.updateDescriptors();
 }

@@ -46,6 +46,7 @@
 const std = @import("std");
 const Page = @import("../storage/RawDataFile.zig").Page;
 const MemTuple = @import("../data/tuple.zig").MemTuple;
+const ids = @import("../ids.zig");
 const t = @import("../data/types.zig");
 const oom = @import("../utils.zig").oom;
 
@@ -80,13 +81,16 @@ fn header(self: *const HeapPage) *PageHeader {
 /// Representation of a on-disk tuple
 /// Since heap tuple size is dynamic, all operations with heap tuples
 /// must use HeapTuple (the pointer).
-const HeapTuple = extern struct {
+const HeapTuple = struct {
     // The tuple pointer is align(1) because no alignment is guaranteed on
     // the actual heap page.
     ptr: *align(1) Data,
 
     const Header = extern struct {
         count: u16,
+        padding: u16 = 0,
+        xmin: ids.TransactionId,
+        xmax: ids.TransactionId,
     };
 
     /// Representation of the HeapTuple data.
@@ -117,7 +121,7 @@ const HeapTuple = extern struct {
         const data: [*]u8 = @ptrCast(&offsets[n + 1]);
         return .{
             .h = &self.ptr.h,
-            .offsets = offsets[0..n],
+            .offsets = offsets[0 .. n + 1],
             .data = data[0..offsets[n]],
         };
     }
@@ -137,7 +141,7 @@ const HeapTuple = extern struct {
         self: HeapTuple,
         descr: *const t.TupleDescriptor,
         alloc: std.mem.Allocator,
-    ) MemTuple {
+    ) ExtendedMemTuple {
         std.debug.assert(self.ptr.h.count == descr.attrs.len);
         const d = self.details();
         const mem_tuple_size = @sizeOf(MemTuple.Header) +
@@ -159,7 +163,11 @@ const HeapTuple = extern struct {
         @memcpy(dest_offsets_ptr, d.offsets);
         @memcpy(dest_data_ptr, d.data);
 
-        return mem_tuple;
+        return .{
+            .tuple = mem_tuple,
+            .xmin = self.ptr.h.xmin,
+            .xmax = self.ptr.h.xmax,
+        };
     }
 
     /// Calculate the expected size of a MemTuple if it's written onto disk.
@@ -173,20 +181,30 @@ const HeapTuple = extern struct {
     /// Serialize a MemTuple as a HeapTuple.
     /// The destination must have exact amount of space to fit the tuple.
     /// That can be calculated with expectedSize()
-    fn write(mem: MemTuple, dest: []u8) void {
+    fn write(mem: ExtendedMemTuple, dest: []u8) void {
         // Ensure the size matches
-        std.debug.assert(dest.len == expectedSize(mem));
-        const d = mem.details();
-        const mem_len = mem.len();
+        std.debug.assert(dest.len == expectedSize(mem.tuple));
+        const d = mem.tuple.details();
+        const mem_len = mem.tuple.len();
 
         const dest_tuple: HeapTuple = .{ .ptr = @ptrCast(dest) };
-        dest_tuple.ptr.h.count = @intCast(mem_len);
+        dest_tuple.ptr.h = .{
+            .count = @intCast(mem_len),
+            .xmin = mem.xmin,
+            .xmax = mem.xmax,
+        };
 
         const dest_offsets_ptr: [*]align(1) u16 = @ptrCast(&dest_tuple.ptr.offsets_start);
         const dest_data_ptr: [*]align(1) u8 = @ptrCast(&dest_offsets_ptr[mem_len + 1]);
         @memcpy(dest_offsets_ptr, d.offsets);
         @memcpy(dest_data_ptr, d.data);
     }
+};
+
+pub const ExtendedMemTuple = struct {
+    tuple: MemTuple,
+    xmin: ids.TransactionId,
+    xmax: ids.TransactionId,
 };
 
 /// Get pointer to raw data of i-th tuple on the page.
@@ -202,7 +220,7 @@ pub fn read(
     i: u16,
     descr: *const t.TupleDescriptor,
     alloc: std.mem.Allocator,
-) MemTuple {
+) ExtendedMemTuple {
     const tuple = self.getHeapTuple(i);
     return tuple.read(descr, alloc);
 }
@@ -233,8 +251,8 @@ pub fn fits(self: *const HeapPage, tuple: MemTuple) bool {
 
 /// Put a new MemTuple on this HeapPage. The offset is placed at the end of
 /// the offset array.
-pub fn add(self: *HeapPage, tuple: MemTuple) void {
-    std.debug.assert(self.fits(tuple));
+pub fn add(self: *HeapPage, tuple: ExtendedMemTuple) void {
+    std.debug.assert(self.fits(tuple.tuple));
 
     // Offset of a last tuple on the page
     const last_offset = if (self.offsets.len == 0)
@@ -243,9 +261,9 @@ pub fn add(self: *HeapPage, tuple: MemTuple) void {
         self.offsets[self.offsets.len - 1];
     // The offset of the new tuple is *less* than the last one, and
     // the space between them must fit the heap tuple.
-    const new_offset = last_offset - HeapTuple.expectedSize(tuple);
+    const new_offset = last_offset - HeapTuple.expectedSize(tuple.tuple);
 
-    HeapTuple.write(tuple, @ptrCast(&self.page.d[new_offset]));
+    HeapTuple.write(tuple, self.page.d[new_offset..last_offset]);
     self.offsets.len += 1;
     self.offsets[self.offsets.len - 1] = @intCast(new_offset);
     self.header().count += 1;
@@ -254,12 +272,16 @@ pub fn add(self: *HeapPage, tuple: MemTuple) void {
 /// Update the i-th tuple on HeapPage with a new MemTuple.
 /// This can be done if the new data fits into the space currently taken
 /// by old data, which can be checked with canUpdateInPlace.
-pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple) void {
+pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple, tid: ids.TransactionId) void {
     std.debug.assert(self.canUpdateInPlace(i, new));
     const tuple = self.getHeapTuple(i);
     const raw: [*]u8 = @ptrCast(tuple.ptr);
     // The space currently occupied by the tuple.
     const dest = raw[0..tuple.heapSize()];
     @memset(dest, 0);
-    HeapTuple.write(new, dest);
+    HeapTuple.write(.{
+        .tuple = new,
+        .xmin = tid,
+        .xmax = .invalid,
+    }, dest);
 }

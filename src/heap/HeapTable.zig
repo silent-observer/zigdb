@@ -62,7 +62,7 @@ pub fn init(cache: *storage.Cache, table_id: ids.FullTableId) HeapTable {
 /// Only initializes its 0th page.
 pub fn create(self: HeapTable) !void {
     const page = try self.cache.getWriteable(.{
-        .file = self.table_id,
+        .file = self.table_id.fullFileId(),
         .page = 0,
     });
     defer self.cache.unlock(page);
@@ -84,7 +84,7 @@ pub fn truncate(self: HeapTable) !void {
 pub fn addPage(self: HeapTable) !Page.Id {
     // Obtain the header page
     const page = try self.cache.getWriteable(.{
-        .file = self.table_id,
+        .file = self.table_id.fullFileId(),
         .page = 0,
     });
     defer self.cache.unlock(page);
@@ -97,7 +97,7 @@ pub fn addPage(self: HeapTable) !Page.Id {
 
     // Write the new page (zero-initialized)
     const new_page = try self.cache.getWriteable(.{
-        .file = self.table_id,
+        .file = self.table_id.fullFileId(),
         .page = page_id,
     });
     defer self.cache.unlock(new_page);
@@ -109,7 +109,7 @@ pub fn addPage(self: HeapTable) !Page.Id {
 /// Read the header of the HeapTable.
 pub fn readHeader(self: HeapTable) !Header {
     const page = try self.cache.get(.{
-        .file = self.table_id,
+        .file = self.table_id.fullFileId(),
         .page = 0,
     });
     defer self.cache.unlock(page);
@@ -118,7 +118,7 @@ pub fn readHeader(self: HeapTable) !Header {
 }
 
 /// Add a new tuple to the HeapTable.
-pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
+pub fn addOneTuple(self: HeapTable, tuple: MemTuple, tid: ids.TransactionId) !void {
     const header = try self.readHeader();
 
     // Go through pages to find a page that can fit this new tuple.
@@ -126,7 +126,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
     const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
         // Read the page
         const raw_page = try self.cache.get(.{
-            .file = self.table_id,
+            .file = self.table_id.fullFileId(),
             .page = @intCast(page_id),
         });
         defer self.cache.unlock(raw_page);
@@ -140,19 +140,23 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
     // Write the tuple to the page
     {
         const raw_page = try self.cache.getWriteable(.{
-            .file = self.table_id,
+            .file = self.table_id.fullFileId(),
             .page = page_id,
         });
         defer self.cache.unlock(raw_page);
         var page = HeapPage.parse(raw_page.page);
 
-        page.add(tuple);
+        page.add(.{
+            .tuple = tuple,
+            .xmin = tid,
+            .xmax = .invalid,
+        });
     }
 
     // Update the number of tuples on the header page
     {
         const page = try self.cache.getWriteable(.{
-            .file = self.table_id,
+            .file = self.table_id.fullFileId(),
             .page = 0,
         });
         defer self.cache.unlock(page);
@@ -164,7 +168,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
 /// Update the tuple directly on the page.
 /// Care must be taken to ensure that the new data isn't bigger in size
 /// than old data.
-pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
+pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple, tid: ids.TransactionId) !void {
     const header = try self.readHeader();
 
     // How many tuples we already skipped
@@ -173,7 +177,7 @@ pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
     const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
         // Read the page
         const raw_page = try self.cache.get(.{
-            .file = self.table_id,
+            .file = self.table_id.fullFileId(),
             .page = @intCast(page_id),
         });
         defer self.cache.unlock(raw_page);
@@ -190,7 +194,7 @@ pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
     // Actually update the tuple on the page
     {
         const raw_page = try self.cache.getWriteable(.{
-            .file = self.table_id,
+            .file = self.table_id.fullFileId(),
             .page = page_id,
         });
         defer self.cache.unlock(raw_page);
@@ -199,6 +203,6 @@ pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
         // Check that we can actually update the tuple
         if (!page.canUpdateInPlace(@intCast(i - counter), tuple))
             @panic("Cannot actually update in place!");
-        page.updateInPlace(@intCast(i - counter), tuple);
+        page.updateInPlace(@intCast(i - counter), tuple, tid);
     }
 }

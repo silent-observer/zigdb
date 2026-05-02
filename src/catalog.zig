@@ -5,3 +5,5 @@ pub const SystemAttribute = tables.SystemAttribute;
 pub const SequenceId = tables.SequenceId;
 pub const Entry = tables.Entry;
 pub const Attr = tables.Attr;
+pub const Sequence = Cache.Sequence;
+pub const Table = Cache.Table;
