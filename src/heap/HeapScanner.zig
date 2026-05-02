@@ -5,6 +5,7 @@ const std = @import("std");
 const RawDataFile = @import("../storage/RawDataFile.zig");
 const Page = RawDataFile.Page;
 const storage = @import("../storage.zig");
+const transaction = @import("../transaction.zig");
 const HeapTable = @import("HeapTable.zig");
 const HeapPage = @import("HeapPage.zig");
 const MemTuple = @import("../data/tuple.zig").MemTuple;
@@ -24,12 +25,14 @@ tuple_count: u64, // Total number of tuples
 page: ?storage.Cache.LockedPage, // Current page the scanner is reading
 parsed_page: ?HeapPage, // Current page in its parsed state
 cache: *storage.Cache,
+snapshot: *const transaction.Snapshot,
 
 /// Create a new Scanner
 pub fn init(
     cache: *storage.Cache,
     table_id: ids.FullTableId,
     descr: *const t.TupleDescriptor,
+    snapshot: *const transaction.Snapshot,
 ) !HeapScanner {
     const header = try HeapTable.init(cache, table_id).readHeader();
 
@@ -43,6 +46,7 @@ pub fn init(
         .page = null,
         .parsed_page = null,
         .cache = cache,
+        .snapshot = snapshot,
     };
 }
 
@@ -85,36 +89,44 @@ fn advanceToNonEmpty(self: *HeapScanner) !bool {
 }
 
 /// Advance to the next tuple.
-fn advanceOne(self: *HeapScanner) !bool {
+fn advanceOne(self: *HeapScanner) !void {
     // This should only be done if we already have a valid page
     std.debug.assert(self.parsed_page != null);
 
     self.tuple_index += 1;
     // If we still have tuples on the current page, we're done
     if (self.tuple_index < self.parsed_page.?.offsets.len)
-        return true;
+        return;
 
     // Advance to the next non-empty page if we have to
     self.tuple_index = 0;
     self.page_id += 1;
     self.closePage();
-    return self.advanceToNonEmpty();
+}
+
+fn tupleVisible(self: *HeapScanner, tuple: ExtendedMemTuple) !bool {
+    const creation_visible = try self.snapshot.changesVisible(tuple.xmin);
+    const deletion_visible = try self.snapshot.changesVisible(tuple.xmax);
+    return creation_visible and !deletion_visible;
 }
 
 /// Get the next tuple, allocating it with the given Allocator.
 pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?ExtendedMemTuple {
-    // Ensure we have a valid non-empty page
-    if (!try self.advanceToNonEmpty())
-        return null;
+    while (true) {
+        // Ensure we have a valid non-empty page
+        if (!try self.advanceToNonEmpty())
+            return null;
 
-    // Read the tuple from the page
-    const result = self.parsed_page.?.read(
-        self.tuple_index,
-        self.descr,
-        tuple_alloc,
-    );
+        // Read the tuple from the page
+        const result = self.parsed_page.?.read(
+            self.tuple_index,
+            self.descr,
+            tuple_alloc,
+        );
 
-    // Advance to the next tuple
-    _ = try self.advanceOne();
-    return result;
+        // Advance to the next tuple
+        try self.advanceOne();
+        if (try self.tupleVisible(result))
+            return result;
+    }
 }

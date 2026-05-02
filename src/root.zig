@@ -5,10 +5,10 @@ pub const storage = @import("storage.zig");
 const heap = @import("heap.zig");
 pub const ids = @import("ids.zig");
 pub const catalog = @import("catalog.zig");
+pub const transaction = @import("transaction.zig");
 const planner = @import("planner.zig");
 const Executor = @import("executor/Executor.zig");
 const Context = @import("executor/Context.zig");
-pub const TransactionLog = @import("transactions/TransactionLog.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");
@@ -28,7 +28,7 @@ pub fn execute_stmt(
     gpa: std.mem.Allocator,
     storage_cache: *storage.Cache,
     catalog_cache: *catalog.Cache,
-    transaction_log: *TransactionLog,
+    transaction_log: *transaction.Log,
     query: []const u8,
 ) !void {
     // Temporary arena for this statement
@@ -88,6 +88,11 @@ pub fn execute_stmt(
         const tid = transaction_log.next();
         errdefer transaction_log.set(tid, .aborted) catch {};
 
+        const snapshot = transaction.Snapshot.create(
+            transaction_log,
+            tid,
+        );
+
         // Form the execution context
         var cxt = Context{
             .alloc = arena.allocator(),
@@ -96,6 +101,7 @@ pub fn execute_stmt(
             .transaction_log = transaction_log,
             .db_id = 1,
             .tid = tid,
+            .snapshot = &snapshot,
             .output = stdout,
         };
         // Execute the query

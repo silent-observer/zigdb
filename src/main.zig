@@ -34,7 +34,7 @@ pub fn main(init: std.process.Init) !void {
     // Build the actual catalog tables (this recreates the database from scratch)
     try catalog_cache.build();
 
-    var transaction_log = zigdb.TransactionLog.init(&storage_cache);
+    var transaction_log = zigdb.transaction.Log.init(&storage_cache);
 
     //try catalog_cache.rebuild();
 
@@ -56,14 +56,14 @@ pub fn main(init: std.process.Init) !void {
             break;
 
         // Execute the query
-        try zigdb.execute_stmt(
+        zigdb.execute_stmt(
             init.io,
             init.gpa,
             &storage_cache,
             &catalog_cache,
             &transaction_log,
             line.written(),
-        );
+        ) catch {};
         try storage_cache.flush();
 
         // Clear the command writer for the next command

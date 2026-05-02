@@ -1,19 +1,13 @@
 const std = @import("std");
 const ids = @import("../ids.zig");
 const storage = @import("../storage.zig");
+const transaction = @import("transaction.zig");
 const oom = @import("../utils.zig").oom;
 
 const TransactionLog = @This();
 
 next_tid: ids.TransactionId = .start,
 storage_cache: *storage.Cache,
-
-pub const TransactionStatus = enum(u2) {
-    in_progress = 0,
-    committed = 1,
-    aborted = 2,
-    reserved = 3,
-};
 
 const status_count_per_byte = 4;
 const status_count_per_page = storage.Page.Size * status_count_per_byte;
@@ -45,7 +39,7 @@ fn split(tid: ids.TransactionId) Address {
     };
 }
 
-pub fn get(self: *TransactionLog, tid: ids.TransactionId) !TransactionStatus {
+pub fn get(self: *TransactionLog, tid: ids.TransactionId) !transaction.Status {
     const addr = split(tid);
     const page = try self.storage_cache.get(addr.page_id);
     defer self.storage_cache.unlock(page);
@@ -54,7 +48,7 @@ pub fn get(self: *TransactionLog, tid: ids.TransactionId) !TransactionStatus {
     return @enumFromInt((byte >> addr.bit_shift) & 0x3);
 }
 
-pub fn set(self: *TransactionLog, tid: ids.TransactionId, status: TransactionStatus) !void {
+pub fn set(self: *TransactionLog, tid: ids.TransactionId, status: transaction.Status) !void {
     const addr = split(tid);
     const page = try self.storage_cache.getWriteable(addr.page_id);
     defer self.storage_cache.unlock(page);
@@ -65,6 +59,6 @@ pub fn set(self: *TransactionLog, tid: ids.TransactionId, status: TransactionSta
 }
 
 pub fn next(self: *TransactionLog) ids.TransactionId {
-    defer self.next_tid = @enumFromInt(@intFromEnum(self.next_tid) + 1);
+    defer self.next_tid = self.next_tid.next();
     return self.next_tid;
 }

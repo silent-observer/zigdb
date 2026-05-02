@@ -48,4 +48,8 @@ pub const TransactionId = enum(u32) {
     frozen = 1,
     start = 32,
     _,
+
+    pub fn next(self: TransactionId) TransactionId {
+        return @enumFromInt(@intFromEnum(self) + 1);
+    }
 };

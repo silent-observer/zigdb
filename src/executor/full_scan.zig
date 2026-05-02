@@ -25,6 +25,7 @@ pub fn init(plan: *Plan.DataNode, cxt: *Context) !void {
         cxt.storage_cache,
         .{ .db = cxt.db_id, .table = table_id },
         descr,
+        cxt.snapshot,
     );
     // Create the internal state and attach it to plan
     const state = cxt.alloc.create(State) catch oom();
