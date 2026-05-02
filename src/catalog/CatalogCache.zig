@@ -9,6 +9,7 @@ const t = @import("../data/types.zig");
 const tables = @import("tables.zig");
 const heap = @import("../heap.zig");
 const storage = @import("../storage.zig");
+const transaction = @import("../transaction.zig");
 const ids = @import("../ids.zig");
 const oom = @import("../utils.zig").oom;
 
@@ -89,11 +90,11 @@ pub fn deinit(self: *CatalogCache) void {
 }
 
 /// Update the catalog cache from the actual data on disk.
-pub fn rebuild(self: *CatalogCache) !void {
+pub fn rebuild(self: *CatalogCache, snapshot: *const transaction.Snapshot) !void {
     // Go through all the fields in the CatalogTables struct
     inline for (std.meta.fields(CatalogTables)) |field| {
         // Rebuild each one
-        try @field(self.catalog, field.name).rebuild(self.storage_cache);
+        try @field(self.catalog, field.name).rebuild(self.storage_cache, snapshot);
     }
     // Also update the descriptors
     try self.updateDescriptors();
@@ -170,7 +171,7 @@ pub fn Table(comptime id: tables.TableId) type {
         }
 
         /// Rebuild the cache by reading from disk
-        pub fn rebuild(self: *TSelf, cache: *storage.Cache) !void {
+        pub fn rebuild(self: *TSelf, cache: *storage.Cache, snapshot: *const transaction.Snapshot) !void {
             // Free all the existing tuples in the cache
             self.data.clearAndFree(self.arena.allocator());
             _ = self.arena.reset(.retain_capacity);
@@ -183,6 +184,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     .table = @intFromEnum(id),
                 },
                 self.descr,
+                snapshot,
             );
             defer scanner.deinit();
 
