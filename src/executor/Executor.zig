@@ -9,6 +9,7 @@ const modify = @import("modify.zig");
 const full_scan = @import("full_scan.zig");
 const values = @import("values.zig");
 const project = @import("project.zig");
+const filter = @import("filter.zig");
 const data = @import("../data.zig");
 const heap = @import("../heap.zig");
 const oom = @import("../utils.zig").oom;
@@ -55,6 +56,7 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
         .full_scan => full_scan.init(plan, cxt),
         .values => values.init(plan, cxt),
         .project => project.init(plan, cxt),
+        .filter => filter.init(plan, cxt),
     };
     r catch |err| {
         cxt.output.print("ERROR: {} during Plan init\n", .{err}) catch {};
@@ -68,6 +70,7 @@ pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
         .full_scan => return full_scan.deinit(plan, cxt),
         .values => return values.deinit(plan, cxt),
         .project => return project.deinit(plan, cxt),
+        .filter => return filter.deinit(plan, cxt),
     }
 }
 
@@ -77,6 +80,7 @@ pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?data.MemTuple {
         .full_scan => full_scan.next(plan, cxt),
         .values => values.next(plan, cxt),
         .project => project.next(plan, cxt),
+        .filter => filter.next(plan, cxt),
     };
     return r catch |err| {
         cxt.output.print("ERROR: {} during execution\n", .{err}) catch {};

@@ -32,6 +32,35 @@ pub const DBType = enum(u32) {
         };
     }
 
+    pub fn isSigned(self: DBType) bool {
+        return switch (self) {
+            .int1, .int2, .int4, .int8 => true,
+            else => false,
+        };
+    }
+
+    pub fn isNumber(self: DBType) bool {
+        return switch (self) {
+            .int1, .int2, .int4, .int8, .uint1, .uint2, .uint4, .uint8 => true,
+            else => false,
+        };
+    }
+
+    pub fn maxIntType(self: DBType, other: DBType) DBType {
+        if (std.meta.eql(self, other))
+            return self
+        else if (self.width().? > other.width().?)
+            return self
+        else if (self.width().? < other.width().?)
+            return other
+        else if (self.isSigned() and !other.isSigned())
+            return self
+        else if (!self.isSigned() and other.isSigned())
+            return other
+        else
+            unreachable;
+    }
+
     /// Approximate width of this type.
     /// It must be the exact with for types with known width,
     /// but can be approximate for variable-width types.

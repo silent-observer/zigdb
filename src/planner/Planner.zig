@@ -199,12 +199,20 @@ fn isConstExpression(expr: ast.Expression) bool {
     switch (expr) {
         .variable => return false,
         .integer => return true,
+        .unary => |u| return isConstExpression(u.expr.*),
+        .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
         else => unreachable,
     }
 }
 
 /// Evaluate the constant expression
-fn evalConstExpression(p: *Planner, expr: ast.Expression) Error!data.TypedValue {
+fn evalConstExpression(
+    p: *Planner,
+    expr: ast.Expression,
+    cxt: *const data.TupleDescriptor,
+) Error!data.TypedValue {
+    const t = try p.inferExprType(expr, cxt);
+
     switch (expr) {
         .variable => |v| {
             p.addError("Cannot use variable \"{s}\" as a constant", .{v});
@@ -212,9 +220,80 @@ fn evalConstExpression(p: *Planner, expr: ast.Expression) Error!data.TypedValue 
         },
         .integer => |i| return data.TypedValue{
             .v = .{ .int = i },
-            .t = .int4,
+            .t = t,
         },
-        else => unreachable,
+        .unary => |u| {
+            const x = try p.evalConstExpression(u.expr.*, cxt);
+            switch (u.op) {
+                .neg => {
+                    return data.TypedValue{
+                        .v = .{ .int = -x.v.int },
+                        .t = t,
+                    };
+                },
+                .not => {
+                    return data.TypedValue{
+                        .v = .{ .bool = !x.v.bool },
+                        .t = t,
+                    };
+                },
+            }
+        },
+        .binary => |b| {
+            const lhs = try p.evalConstExpression(b.left.*, cxt);
+            const rhs = try p.evalConstExpression(b.right.*, cxt);
+            switch (b.op) {
+                .add, .sub, .mul, .div => {
+                    const v = switch (b.op) {
+                        .add => lhs.v.int + rhs.v.int,
+                        .sub => lhs.v.int - rhs.v.int,
+                        .mul => lhs.v.int * rhs.v.int,
+                        .div => @divTrunc(lhs.v.int, rhs.v.int),
+                        else => unreachable,
+                    };
+                    return data.TypedValue{
+                        .v = .{ .int = v },
+                        .t = t,
+                    };
+                },
+                .@"and", .@"or" => {
+                    const v = switch (b.op) {
+                        .@"and" => lhs.v.bool and rhs.v.bool,
+                        .@"or" => lhs.v.bool or rhs.v.bool,
+                        else => unreachable,
+                    };
+                    return data.TypedValue{
+                        .v = .{ .bool = v },
+                        .t = t,
+                    };
+                },
+                .eq, .ne => {
+                    const v = switch (lhs.v) {
+                        .bool => lhs.v.bool == rhs.v.bool,
+                        .int => lhs.v.int == rhs.v.int,
+                        .text => std.mem.eql(u8, lhs.v.text, rhs.v.text),
+                    };
+                    return data.TypedValue{
+                        .v = .{ .bool = v },
+                        .t = t,
+                    };
+                },
+                .lt, .gt, .le, .ge => {
+                    const v = switch (b.op) {
+                        .lt => lhs.v.int < rhs.v.int,
+                        .gt => lhs.v.int > rhs.v.int,
+                        .le => lhs.v.int <= rhs.v.int,
+                        .ge => lhs.v.int >= rhs.v.int,
+                        else => unreachable,
+                    };
+                    return data.TypedValue{
+                        .v = .{ .bool = v },
+                        .t = t,
+                    };
+                },
+            }
+        },
+        .err => unreachable,
     }
 }
 
@@ -222,7 +301,8 @@ fn evalConstExpression(p: *Planner, expr: ast.Expression) Error!data.TypedValue 
 fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
     switch (expr) {
         .variable => |v| return v,
-        .integer => |i| return std.fmt.allocPrint(p.alloc, "num{}", .{i}) catch oom(),
+        .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
+        .unary, .binary => return "expr",
         else => unreachable,
     }
 }
@@ -260,6 +340,27 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 
     // This is the input data
     var root = input_node;
+    // Add a filter if we have a WHERE clause
+    if (stmt.where) |condition| {
+        const filter = p.alloc.create(Plan.DataNode) catch oom();
+        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
+        expr.* = try p.planExpression(condition.*, root.descr);
+
+        if (expr.dbtype != .bool) {
+            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
+            return Error.TypeError;
+        }
+
+        filter.* = .{
+            .descr = root.descr,
+            .action = .{ .filter = .{
+                .input = root,
+                .condition = expr,
+            } },
+        };
+        root = filter;
+    }
+
     // Add a projection node if needed
     if (need_project) {
         // Build the description
@@ -274,15 +375,15 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
         }
 
         // Create the projection node
-        const project_node = p.alloc.create(Plan.DataNode) catch oom();
-        project_node.* = .{
+        const project = p.alloc.create(Plan.DataNode) catch oom();
+        project.* = .{
             .descr = new_descr,
             .action = .{ .project = .{
                 .input = root,
                 .exprs = scalarNodes,
             } },
         };
-        root = project_node;
+        root = project;
     }
 
     // Create the statement node
@@ -322,7 +423,7 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
 fn planValues(
     p: *Planner,
     values: *const std.ArrayList(ast.ValueList),
-    descr: *const data.TupleDescriptor,
+    cxt: *const data.TupleDescriptor,
 ) Error!*Plan.DataNode {
     // The list of tuples in the VALUES
     var values_data =
@@ -330,18 +431,18 @@ fn planValues(
     // Go through all the rows in the query
     for (values.items) |row| {
         // Check the row lengths
-        if (row.columns.items.len != descr.attrs.len) {
+        if (row.columns.items.len != cxt.attrs.len) {
             p.addError(
                 "Expected {} values but got {}",
-                .{ descr.attrs.len, row.columns.items.len },
+                .{ cxt.attrs.len, row.columns.items.len },
             );
             return Error.Other;
         }
 
         // Build the tuple
-        var b = data.MemTuple.Builder.init(p.alloc, descr);
-        for (row.columns.items, descr.attrs.items(.t)) |expr, t| {
-            const val = try p.evalConstExpression(expr);
+        var b = data.MemTuple.Builder.init(p.alloc, cxt);
+        for (row.columns.items, cxt.attrs.items(.t)) |expr, t| {
+            const val = try p.evalConstExpression(expr, cxt);
             // Check the type of the value
             if (!val.t.convertsTo(t)) {
                 p.addError("Expected type {} but got {}", .{ t, val });
@@ -355,10 +456,67 @@ fn planValues(
     // Build the data source node
     const data_node = p.alloc.create(Plan.DataNode) catch oom();
     data_node.* = .{
-        .descr = descr,
+        .descr = cxt,
         .action = .{ .values = .{ .data = values_data } },
     };
     return data_node;
+}
+
+fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const data.TupleDescriptor) Error!data.DBType {
+    switch (expr) {
+        .variable => |v| { // Variable expression
+            // Find the column
+            const col_id = cxt.findAttribute(v);
+            if (col_id == null) {
+                p.addError("Can't find variable \"{s}\"", .{v});
+                return Error.UnknownName;
+            }
+            // Construct the scalar node
+            return cxt.attrs.get(col_id.?).t;
+        },
+        .integer => return .int4,
+        .unary => |u| return p.inferExprType(u.expr.*, cxt),
+        .binary => |u| {
+            const lhs = try p.inferExprType(u.left.*, cxt);
+            const rhs = try p.inferExprType(u.right.*, cxt);
+            switch (u.op) {
+                .add, .sub, .mul, .div => {
+                    if (!lhs.isNumber()) {
+                        p.addError("Cannot use arithmetic operator on type {}", .{lhs});
+                        return Error.TypeError;
+                    } else if (!rhs.isNumber()) {
+                        p.addError("Cannot use arithmetic operator on type {}", .{rhs});
+                        return Error.TypeError;
+                    } else return lhs.maxIntType(rhs);
+                },
+                .@"and", .@"or" => {
+                    if (lhs != .bool) {
+                        p.addError("Cannot use logic operator on type {}", .{lhs});
+                        return Error.TypeError;
+                    } else if (lhs != .bool) {
+                        p.addError("Cannot use logic operator on type {}", .{rhs});
+                        return Error.TypeError;
+                    } else return .bool;
+                },
+                .eq, .ne => {
+                    const both_numbers = lhs.isNumber() and rhs.isNumber();
+                    const same_type = std.meta.eql(lhs, rhs);
+                    if (!both_numbers and !same_type) {
+                        p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
+                        return Error.TypeError;
+                    } else return .bool;
+                },
+                .lt, .gt, .le, .ge => {
+                    const both_numbers = lhs.isNumber() and rhs.isNumber();
+                    if (!both_numbers) {
+                        p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
+                        return Error.TypeError;
+                    } else return .bool;
+                },
+            }
+        },
+        .err => unreachable,
+    }
 }
 
 // Plan the scalar node for an expression (in the context of some tuple descriptor).
@@ -370,13 +528,15 @@ fn planExpression(
     // Fast return for constant expressions
     if (isConstExpression(expr)) {
         // Evaluate the constant
-        const v = try p.evalConstExpression(expr);
+        const v = try p.evalConstExpression(expr, cxt);
         // Construct the expression
         return Plan.ScalarNode{
             .action = .{ .value = v.v },
             .dbtype = v.t,
         };
     }
+
+    const t = try p.inferExprType(expr, cxt);
 
     switch (expr) {
         .variable => |v| { // Variable expression
@@ -389,10 +549,35 @@ fn planExpression(
             // Construct the scalar node
             return Plan.ScalarNode{
                 .action = .{ .column = @intCast(col_id.?) },
-                .dbtype = cxt.attrs.get(col_id.?).t,
+                .dbtype = t,
+            };
+        },
+        .unary => |u| {
+            const child = p.alloc.create(Plan.ScalarNode) catch oom();
+            child.* = try p.planExpression(u.expr.*, cxt);
+            return Plan.ScalarNode{
+                .action = .{ .unary = .{
+                    .op = u.op,
+                    .child = child,
+                } },
+                .dbtype = t,
+            };
+        },
+        .binary => |b| {
+            const left = p.alloc.create(Plan.ScalarNode) catch oom();
+            const right = p.alloc.create(Plan.ScalarNode) catch oom();
+            left.* = try p.planExpression(b.left.*, cxt);
+            right.* = try p.planExpression(b.right.*, cxt);
+            return Plan.ScalarNode{
+                .action = .{ .binary = .{
+                    .op = b.op,
+                    .left = left,
+                    .right = right,
+                } },
+                .dbtype = t,
             };
         },
         .integer => unreachable, // This is supposed to be a constant
-        else => unreachable,
+        .err => unreachable,
     }
 }

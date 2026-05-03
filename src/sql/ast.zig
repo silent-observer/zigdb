@@ -14,6 +14,7 @@ pub const Statement = union(enum) {
     pub const Select = struct {
         columns: std.ArrayList(Expression),
         sources: std.ArrayList(DataSource),
+        where: ?*Expression,
     };
 
     pub const InsertValues = struct {
@@ -68,8 +69,8 @@ pub const Expression = union(enum) {
             lt,
             ge,
             le,
-            logic_and,
-            logic_or,
+            @"and",
+            @"or",
         };
     };
 
@@ -79,6 +80,7 @@ pub const Expression = union(enum) {
 
         pub const Op = enum {
             neg,
+            not,
         };
     };
 };

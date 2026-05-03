@@ -4,6 +4,7 @@ const std = @import("std");
 
 const data = @import("../data.zig");
 const ids = @import("../ids.zig");
+const ast = @import("../sql/ast.zig");
 
 /// This is a column index inside a given tuple descriptor.
 pub const ColumnId = u16;
@@ -57,6 +58,7 @@ pub const DataNode = struct {
         full_scan: FullScan,
         values: Values,
         project: Project,
+        filter: Filter,
 
         /// Performs a full scan of some table
         pub const FullScan = struct {
@@ -76,6 +78,14 @@ pub const DataNode = struct {
             input: *DataNode,
             /// Expressions to execute and return
             exprs: std.ArrayList(ScalarNode),
+        };
+
+        /// Filters input data, only leaving rows that fit the condition.
+        pub const Filter = struct {
+            /// Input data source
+            input: *DataNode,
+            /// Condition to check
+            condition: *ScalarNode,
         };
     };
 
@@ -99,5 +109,22 @@ pub const ScalarNode = struct {
     pub const Action = union(enum) {
         column: ColumnId, // Value from a column
         value: data.Value, // Constant value
+        unary: Unary, // Unary operation
+        binary: Binary, // Binary operation
+    };
+
+    pub const Unary = struct {
+        op: Op,
+        child: *ScalarNode,
+
+        pub const Op = ast.Expression.Unary.Op;
+    };
+
+    pub const Binary = struct {
+        op: Op,
+        left: *ScalarNode,
+        right: *ScalarNode,
+
+        pub const Op = ast.Expression.Binary.Op;
     };
 };

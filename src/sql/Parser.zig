@@ -179,13 +179,19 @@ fn parseStmt(p: *Parser) ast.Statement {
 fn parseSelect(p: *Parser) ast.Statement {
     p.expectKeyword(.select) catch return .err;
     const columns =
-        p.parseCommaListErr(ast.Expression, parseExpression) catch return .err;
+        p.parseCommaList(ast.Expression, parseExpression);
     p.expectKeyword(.from) catch return .err;
     const sources = p.parseDataSourceList() catch return .err;
+    const condition = if (p.eat(.{ .keyword = .where })) block: {
+        const expr = p.alloc.create(ast.Expression) catch oom();
+        expr.* = p.parseExpression();
+        break :block expr;
+    } else null;
     p.expectSymbol(.semi) catch return .err;
     return .{ .select = .{
         .columns = columns,
         .sources = sources,
+        .where = condition,
     } };
 }
 
@@ -280,7 +286,7 @@ fn parseInsert(p: *Parser) ast.Statement {
 fn parseValueList(p: *Parser) !ast.ValueList {
     try p.expectSymbol(.lparen);
     const exprs =
-        try p.parseCommaListErr(ast.Expression, parseExpression);
+        p.parseCommaList(ast.Expression, parseExpression);
     try p.expectSymbol(.rparen);
     return .{ .columns = exprs };
 }
@@ -362,12 +368,127 @@ fn parseType(p: *Parser) InternalError!DBType {
     return InternalError.UnexpectedToken;
 }
 
-/// Parse an expression. Currently only numbers and columns are supported.
+fn parseExpression(p: *Parser) ast.Expression {
+    return p.parseExpressionPratt(0);
+}
+
+fn prefixBindingPower(t: Lexer.Token.Kind) ?u8 {
+    return switch (t) {
+        .symbol => |s| switch (s) {
+            .minus => 25,
+            else => null,
+        },
+        .keyword => |kw| switch (kw) {
+            .not => 5,
+            else => null,
+        },
+        else => null,
+    };
+}
+
+fn infixBindingPower(t: Lexer.Token.Kind) ?struct { l: u8, r: u8 } {
+    return switch (t) {
+        .symbol => |s| switch (s) {
+            .eq, .ne => .{ .l = 6, .r = 5 },
+            .lt, .gt, .le, .ge => .{ .l = 7, .r = 8 },
+            .plus, .minus => .{ .l = 21, .r = 22 },
+            .star, .slash => .{ .l = 23, .r = 24 },
+            else => null,
+        },
+        .keyword => |kw| switch (kw) {
+            .@"or" => .{ .l = 1, .r = 2 },
+            .@"and" => .{ .l = 3, .r = 4 },
+            else => null,
+        },
+        else => null,
+    };
+}
+
+fn infixOp(t: Lexer.Token.Kind) ?ast.Expression.Binary.Op {
+    return switch (t) {
+        .symbol => |s| switch (s) {
+            .plus => .add,
+            .minus => .sub,
+            .star => .mul,
+            .slash => .div,
+            .eq => .eq,
+            .ne => .ne,
+            .lt => .lt,
+            .gt => .gt,
+            .le => .le,
+            .ge => .ge,
+            else => null,
+        },
+        .keyword => |kw| switch (kw) {
+            .@"or" => .@"or",
+            .@"and" => .@"and",
+            else => null,
+        },
+        else => null,
+    };
+}
+
+fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
+    const t = p.peek();
+    var lhs = switch (t.kind) {
+        .symbol => |s| switch (s) {
+            .lparen => lhs: {
+                p.expectSymbol(.lparen) catch unreachable;
+                const expr = p.parseExpressionPratt(0);
+                p.expectSymbol(.rparen) catch return .err;
+                break :lhs expr;
+            },
+            .minus => lhs: {
+                p.expectSymbol(.minus) catch unreachable;
+                const bp = prefixBindingPower(t.kind).?;
+                const expr = p.alloc.create(ast.Expression) catch oom();
+                expr.* = p.parseExpressionPratt(bp);
+                break :lhs ast.Expression{ .unary = .{
+                    .op = .neg,
+                    .expr = expr,
+                } };
+            },
+            else => {
+                p.addError(t, "Expected expression but got \"{s}\"", .{s.text()});
+                return .err;
+            },
+        },
+        else => p.parseAtomicExpression(),
+    };
+
+    while (true) {
+        const op_token = p.peek();
+        if (infixBindingPower(op_token.kind)) |bp| {
+            if (bp.l < min_bp)
+                break;
+
+            p.advance();
+
+            const lhs_expr = p.alloc.create(ast.Expression) catch oom();
+            const rhs_expr = p.alloc.create(ast.Expression) catch oom();
+
+            lhs_expr.* = lhs;
+            rhs_expr.* = p.parseExpressionPratt(bp.r);
+
+            lhs = .{ .binary = .{
+                .op = infixOp(op_token.kind).?,
+                .left = lhs_expr,
+                .right = rhs_expr,
+            } };
+            continue;
+        }
+
+        break;
+    }
+    return lhs;
+}
+
+/// Parse an atomic expression. Currently only numbers and columns are supported.
 /// ```
-/// Expression = NUMBER
-///            | Name
+/// AtomicExpression = NUMBER
+///                  | Name
 /// ```
-fn parseExpression(p: *Parser) !ast.Expression {
+fn parseAtomicExpression(p: *Parser) ast.Expression {
     const t = p.peek();
     switch (t.kind) {
         .num => {
@@ -380,7 +501,7 @@ fn parseExpression(p: *Parser) !ast.Expression {
             return .{ .integer = x };
         },
         .id => {
-            return .{ .variable = try p.parseName() };
+            return .{ .variable = p.parseName() catch return .err };
         },
         else => {
             p.addError(

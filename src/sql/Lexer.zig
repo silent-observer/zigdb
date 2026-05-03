@@ -34,6 +34,7 @@ pub const Token = struct {
     pub const Keyword = enum(u8) {
         select,
         from,
+        where,
         insert,
         into,
         values,
@@ -43,6 +44,9 @@ pub const Token = struct {
         int,
         bool,
         text,
+        @"and",
+        @"or",
+        not,
     };
 
     pub const Symbol = enum(u8) {
