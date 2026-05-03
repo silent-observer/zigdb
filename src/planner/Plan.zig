@@ -44,9 +44,9 @@ pub const Statement = union(enum) {
         /// Source of the data
         root: *DataNode,
         /// Columns that need updating
-        cols: std.ArrayList(ColumnId),
+        cols: []ColumnId,
         /// Expressions for columns
-        vals: std.ArrayList(ScalarNode),
+        vals: []ScalarNode,
     };
 
     pub const CreateTable = struct {
@@ -89,7 +89,7 @@ pub const DataNode = struct {
         /// Returns rows defined in the query itself
         pub const Values = struct {
             /// Rows to return
-            data: std.ArrayList(data.MemTuple),
+            data: []data.MemTuple,
         };
 
         /// Projects input data by executing scalar expressions on it.
@@ -97,7 +97,7 @@ pub const DataNode = struct {
             /// Input data source
             input: *DataNode,
             /// Expressions to execute and return
-            exprs: std.ArrayList(ScalarNode),
+            exprs: []ScalarNode,
         };
 
         /// Filters input data, only leaving rows that fit the condition.

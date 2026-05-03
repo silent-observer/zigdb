@@ -14,8 +14,8 @@ pub const Statement = union(enum) {
     err: void,
 
     pub const Select = struct {
-        columns: std.ArrayList(Expression),
-        sources: std.ArrayList(DataSource),
+        columns: []Expression,
+        sources: []DataSource,
         where: ?*Expression,
     };
 
@@ -26,13 +26,13 @@ pub const Statement = union(enum) {
 
     pub const InsertValues = struct {
         name: Name,
-        columns: std.ArrayList(Name),
-        values: std.ArrayList(ValueList),
+        columns: []Name,
+        values: []ValueList,
     };
 
     pub const Update = struct {
         name: Name,
-        clauses: std.ArrayList(SetClause),
+        clauses: []SetClause,
         where: ?*Expression,
 
         pub const SetClause = struct {
@@ -43,7 +43,7 @@ pub const Statement = union(enum) {
 
     pub const CreateTable = struct {
         name: Name,
-        columns: std.ArrayList(ColumnDefinition),
+        columns: []ColumnDefinition,
 
         pub const ColumnDefinition = struct {
             name: Name,
@@ -61,7 +61,7 @@ pub const Statement = union(enum) {
 };
 
 pub const ValueList = struct {
-    columns: std.ArrayList(Expression),
+    columns: []Expression,
 };
 
 pub const Expression = union(enum) {

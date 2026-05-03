@@ -62,9 +62,9 @@ fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Sta
     const descr = p.make(data.TupleDescriptor.empty);
     descr.attrs.ensureUnusedCapacity(
         p.alloc,
-        stmt.columns.items.len,
+        stmt.columns.len,
     ) catch oom();
-    for (stmt.columns.items) |c| {
+    for (stmt.columns) |c| {
         descr.attrs.appendAssumeCapacity(.{
             .name = c.name,
             .t = c.col_type,
@@ -139,11 +139,11 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
 
     // This is the descriptor of what we get as input data
     const input_descr = p.alloc.create(data.TupleDescriptor) catch oom();
-    if (stmt.columns.items.len > 0) {
+    if (stmt.columns.len > 0) {
         // If the user specified the list of columns, we might need to reorder them for storage.
         input_descr.* = .empty;
-        input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.items.len) catch oom();
-        if (stmt.columns.items.len != full_descr.attrs.len) {
+        input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
+        if (stmt.columns.len != full_descr.attrs.len) {
             p.addError("Partial insert is not yet supported", .{});
             return Error.NotSupported;
         }
@@ -151,7 +151,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.attrs.len);
 
         // Go through the columns in the statement
-        for (stmt.columns.items, 0..) |col_name, i| {
+        for (stmt.columns, 0..) |col_name, i| {
             // col_id is the index in the physical table, i is the index in the query
             const col_id = full_descr.findAttribute(col_name);
             if (col_id == null) {
@@ -172,7 +172,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     }
 
     // Plan the VALUES data source
-    var root = try p.planValues(&stmt.values, input_descr);
+    var root = try p.planValues(stmt.values, input_descr);
     // We always need a projection node to add extended fields
     {
         // Add the projection node on top of VALUES, if needed
@@ -180,7 +180,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
             .descr = full_descr,
             .action = .{ .project = .{
                 .input = root,
-                .exprs = scalarNodes,
+                .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
             } },
         });
     }
@@ -308,21 +308,21 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
 /// Plan SELECT statement
 fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     // We don't support joins yet, so only one input table
-    if (stmt.sources.items.len != 1) {
+    if (stmt.sources.len != 1) {
         p.addError("Joins not supported yet", .{});
         return Error.NotSupported;
     }
     // Plan the data source for input
-    const source = stmt.sources.items[0];
+    const source = stmt.sources[0];
     const input_node = try p.planDataSource(source);
 
     // The SELECT might contain expression that might need projection
-    var need_project = stmt.columns.items.len != input_node.descr.attrs.len;
+    var need_project = stmt.columns.len != input_node.descr.attrs.len;
     // List of scalar nodes for expressions
     var scalarNodes =
-        std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.items.len) catch oom();
+        std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.len) catch oom();
     // Go through output columns in the query
-    for (stmt.columns.items, 0..) |c, i| {
+    for (stmt.columns, 0..) |c, i| {
         // Build a scalar node for each expression
         const node = try p.planExpression(c, input_node.descr);
         // We don't need projection only if all the expression are column names in the correct order.
@@ -360,8 +360,8 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     if (need_project) {
         // Build the description
         const new_descr = p.make(data.TupleDescriptor.empty);
-        new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.items.len) catch oom();
-        for (stmt.columns.items, scalarNodes.items) |c, n| {
+        new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
+        for (stmt.columns, scalarNodes.items) |c, n| {
             new_descr.attrs.appendAssumeCapacity(.{
                 .name = try p.suggestExpressionName(c),
                 .t = n.dbtype,
@@ -373,7 +373,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
             .descr = new_descr,
             .action = .{ .project = .{
                 .input = root,
-                .exprs = scalarNodes,
+                .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
             } },
         });
     }
@@ -446,11 +446,11 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     }
 
     var cols = std.ArrayList(Plan.ColumnId)
-        .initCapacity(p.alloc, stmt.clauses.items.len) catch oom();
+        .initCapacity(p.alloc, stmt.clauses.len) catch oom();
     var vals = std.ArrayList(Plan.ScalarNode)
-        .initCapacity(p.alloc, stmt.clauses.items.len) catch oom();
+        .initCapacity(p.alloc, stmt.clauses.len) catch oom();
 
-    for (stmt.clauses.items) |clause| {
+    for (stmt.clauses) |clause| {
         const col_id = root.descr.findAttribute(clause.column);
         if (col_id == null) {
             p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column, stmt.name });
@@ -467,8 +467,8 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     return p.make(Plan.Statement{ .update = .{
         .table = table,
         .root = root,
-        .cols = cols,
-        .vals = vals,
+        .cols = cols.toOwnedSlice(p.alloc) catch oom(),
+        .vals = vals.toOwnedSlice(p.alloc) catch oom(),
     } });
 }
 
@@ -499,26 +499,26 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
 /// Plan a data source node for VALUES list
 fn planValues(
     p: *Planner,
-    values: *const std.ArrayList(ast.ValueList),
+    values: []const ast.ValueList,
     cxt: *const data.TupleDescriptor,
 ) Error!*Plan.DataNode {
     // The list of tuples in the VALUES
     var values_data =
-        std.ArrayList(data.MemTuple).initCapacity(p.alloc, values.items.len) catch oom();
+        std.ArrayList(data.MemTuple).initCapacity(p.alloc, values.len) catch oom();
     // Go through all the rows in the query
-    for (values.items) |row| {
+    for (values) |row| {
         // Check the row lengths
-        if (row.columns.items.len != cxt.attrs.len) {
+        if (row.columns.len != cxt.attrs.len) {
             p.addError(
                 "Expected {} values but got {}",
-                .{ cxt.attrs.len, row.columns.items.len },
+                .{ cxt.attrs.len, row.columns.len },
             );
             return Error.Other;
         }
 
         // Build the tuple
         var b = data.MemTuple.Builder.init(p.alloc, cxt);
-        for (row.columns.items, cxt.attrs.items(.t)) |expr, t| {
+        for (row.columns, cxt.attrs.items(.t)) |expr, t| {
             const val = try p.evalConstExpression(expr, cxt);
             // Check the type of the value
             if (!val.t.convertsTo(t)) {
@@ -533,7 +533,9 @@ fn planValues(
     // Build the data source node
     return p.make(Plan.DataNode{
         .descr = cxt,
-        .action = .{ .values = .{ .data = values_data } },
+        .action = .{ .values = .{
+            .data = values_data.toOwnedSlice(p.alloc) catch oom(),
+        } },
     });
 }
 

@@ -78,7 +78,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
             temp_tuple[i] = tuple.getValue(i);
         }
         // Run the updates
-        for (stmt.cols.items, stmt.vals.items) |col, val| {
+        for (stmt.cols, stmt.vals) |col, val| {
             temp_tuple[col] = scalar.eval(&val, tuple);
         }
         // Build the new tuple

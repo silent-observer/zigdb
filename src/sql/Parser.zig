@@ -276,13 +276,13 @@ fn parseCommaList(
     p: *Parser,
     comptime T: type,
     comptime f: fn (p: *Parser) T,
-) std.ArrayList(T) {
+) []T {
     var list: std.ArrayList(T) = .empty;
     list.append(p.alloc, f(p)) catch oom();
     while (p.eat(.{ .symbol = .comma })) {
         list.append(p.alloc, f(p)) catch oom();
     }
-    return list;
+    return list.toOwnedSlice(p.alloc) catch oom();
 }
 
 /// Parse a comma-separated list for a function that can return an error.
@@ -294,26 +294,26 @@ fn parseCommaListErr(
     p: *Parser,
     comptime T: type,
     comptime f: fn (p: *Parser) InternalError!T,
-) InternalError!std.ArrayList(T) {
+) InternalError![]T {
     var list: std.ArrayList(T) = .empty;
     list.append(p.alloc, try f(p)) catch oom();
     while (p.eat(.{ .symbol = .comma })) {
         list.append(p.alloc, try f(p)) catch oom();
     }
-    return list;
+    return list.toOwnedSlice(p.alloc) catch oom();
 }
 
 /// Parse a data source list. Currently is simply a comma-separated list.
 /// ```
 /// DataSourceList = DataSource ("," DataSource)*
 /// ```
-fn parseDataSourceList(p: *Parser) !std.ArrayList(ast.DataSource) {
+fn parseDataSourceList(p: *Parser) ![]ast.DataSource {
     var exprs: std.ArrayList(ast.DataSource) = .empty;
     exprs.append(p.alloc, try p.parseDataSource()) catch oom();
     while (p.eat(.{ .symbol = .comma })) {
         exprs.append(p.alloc, try p.parseDataSource()) catch oom();
     }
-    return exprs;
+    return exprs.toOwnedSlice(p.alloc);
 }
 
 /// Parse a data source. Currently only table names are supported.
@@ -334,12 +334,12 @@ fn parseInsert(p: *Parser) ast.Statement {
     p.expectKeyword(.insert) catch return .err;
     p.expectKeyword(.into) catch return .err;
     const name = p.parseName() catch return .err;
-    const columns: std.ArrayList(ast.Name) = if (p.eat(.{ .symbol = .lparen })) columns: {
+    const columns: []ast.Name = if (p.eat(.{ .symbol = .lparen })) columns: {
         const columns =
             p.parseCommaListErr(ast.Name, parseName) catch return .err;
         p.expectSymbol(.rparen) catch return .err;
         break :columns columns;
-    } else .empty;
+    } else &.{};
     p.expectKeyword(.values) catch return .err;
     const values =
         p.parseCommaListErr(ast.ValueList, parseValueList) catch return .err;

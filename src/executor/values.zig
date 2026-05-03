@@ -36,9 +36,9 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) ?data.MemTuple {
     _ = cxt;
     const state: *State = @ptrCast(@alignCast(plan.state.?));
     defer state.index += 1; // Increment the index at the end
-    if (state.index < plan.action.values.data.items.len)
+    if (state.index < plan.action.values.data.len)
         // Return a tuple
-        return plan.action.values.data.items[state.index]
+        return plan.action.values.data[state.index]
     else
         // We are done
         return null;
