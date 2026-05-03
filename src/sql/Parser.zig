@@ -140,6 +140,13 @@ fn expectSymbol(p: *Parser, s: Lexer.Token.Symbol) InternalError!void {
     }
 }
 
+/// Allocate memory for a value
+pub fn make(p: *Parser, val: anytype) *@TypeOf(val) {
+    const ptr = p.alloc.create(@TypeOf(val)) catch oom();
+    ptr.* = val;
+    return ptr;
+}
+
 /// Parse a whole statement, expecting the end after it.
 pub fn parse(p: *Parser) ast.Statement {
     const result = p.parseStmt();
@@ -186,11 +193,10 @@ fn parseSelect(p: *Parser) ast.Statement {
         p.parseCommaList(ast.Expression, parseExpression);
     p.expectKeyword(.from) catch return .err;
     const sources = p.parseDataSourceList() catch return .err;
-    const condition = if (p.eat(.{ .keyword = .where })) block: {
-        const expr = p.alloc.create(ast.Expression) catch oom();
-        expr.* = p.parseExpression();
-        break :block expr;
-    } else null;
+    const condition = if (p.eat(.{ .keyword = .where }))
+        p.make(p.parseExpression())
+    else
+        null;
     p.expectSymbol(.semi) catch return .err;
     return .{ .select = .{
         .columns = columns,
@@ -207,11 +213,10 @@ fn parseDelete(p: *Parser) ast.Statement {
     p.expectKeyword(.delete) catch return .err;
     p.expectKeyword(.from) catch return .err;
     const name = p.parseName() catch return .err;
-    const condition = if (p.eat(.{ .keyword = .where })) block: {
-        const expr = p.alloc.create(ast.Expression) catch oom();
-        expr.* = p.parseExpression();
-        break :block expr;
-    } else null;
+    const condition = if (p.eat(.{ .keyword = .where }))
+        p.make(p.parseExpression())
+    else
+        null;
     p.expectSymbol(.semi) catch return .err;
     return .{ .delete = .{
         .name = name,
@@ -234,11 +239,10 @@ fn parseUpdate(p: *Parser) ast.Statement {
             parseSetClause,
         ) catch return .err;
 
-    const condition = if (p.eat(.{ .keyword = .where })) block: {
-        const expr = p.alloc.create(ast.Expression) catch oom();
-        expr.* = p.parseExpression();
-        break :block expr;
-    } else null;
+    const condition = if (p.eat(.{ .keyword = .where }))
+        p.make(p.parseExpression())
+    else
+        null;
 
     p.expectSymbol(.semi) catch return .err;
 
@@ -256,8 +260,7 @@ fn parseUpdate(p: *Parser) ast.Statement {
 fn parseSetClause(p: *Parser) InternalError!ast.Statement.Update.SetClause {
     const column = try p.parseName();
     try p.expectSymbol(.eq);
-    const expr = p.alloc.create(ast.Expression) catch oom();
-    expr.* = p.parseExpression();
+    const expr = p.make(p.parseExpression());
     return .{
         .column = column,
         .expr = expr,
@@ -510,8 +513,7 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
             .minus => lhs: {
                 p.expectSymbol(.minus) catch unreachable;
                 const bp = prefixBindingPower(t.kind).?;
-                const expr = p.alloc.create(ast.Expression) catch oom();
-                expr.* = p.parseExpressionPratt(bp);
+                const expr = p.make(p.parseExpressionPratt(bp));
                 break :lhs ast.Expression{ .unary = .{
                     .op = .neg,
                     .expr = expr,
@@ -533,11 +535,8 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 
             p.advance();
 
-            const lhs_expr = p.alloc.create(ast.Expression) catch oom();
-            const rhs_expr = p.alloc.create(ast.Expression) catch oom();
-
-            lhs_expr.* = lhs;
-            rhs_expr.* = p.parseExpressionPratt(bp.r);
+            const lhs_expr = p.make(lhs);
+            const rhs_expr = p.make(p.parseExpressionPratt(bp.r));
 
             lhs = .{ .binary = .{
                 .op = infixOp(op_token.kind).?,

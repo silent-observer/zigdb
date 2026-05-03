@@ -35,6 +35,13 @@ pub fn init(alloc: std.mem.Allocator, cat: *catalog.Cache) Planner {
     };
 }
 
+/// Allocate memory for a value
+pub fn make(p: *Planner, val: anytype) *@TypeOf(val) {
+    const ptr = p.alloc.create(@TypeOf(val)) catch oom();
+    ptr.* = val;
+    return ptr;
+}
+
 /// Plan a statement
 pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
     switch (stmt) {
@@ -52,8 +59,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
 /// Plan CREATE TABLE statement
 fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Statement {
     // Build the TupleDescriptor for the new table
-    const descr = p.alloc.create(data.TupleDescriptor) catch oom();
-    descr.* = data.TupleDescriptor.empty;
+    const descr = p.make(data.TupleDescriptor.empty);
     descr.attrs.ensureUnusedCapacity(
         p.alloc,
         stmt.columns.items.len,
@@ -72,12 +78,10 @@ fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Sta
     ) catch oom();
 
     // Make the statement node.
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .create_table = .{
+    return p.make(Plan.Statement{ .create_table = .{
         .name = lower_name,
         .descr = descr,
-    } };
-    return result;
+    } });
 }
 
 /// Adds a formatted error to the error list.
@@ -112,20 +116,16 @@ fn findTable(p: *Planner, name: []const u8) Error!ids.TableId {
 
 /// Plan DROP TABLE statement
 fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Statement {
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .drop_table = .{
+    return p.make(Plan.Statement{ .drop_table = .{
         .table = try p.findTable(stmt.name),
-    } };
-    return result;
+    } });
 }
 
 /// Plan TRUNCATE statement
 fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement {
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .truncate = .{
+    return p.make(Plan.Statement{ .truncate = .{
         .table = try p.findTable(stmt.name),
-    } };
-    return result;
+    } });
 }
 
 /// Plan INSERT VALUES statement
@@ -176,24 +176,20 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     // We always need a projection node to add extended fields
     {
         // Add the projection node on top of VALUES, if needed
-        const project_node = p.alloc.create(Plan.DataNode) catch oom();
-        project_node.* = .{
+        root = p.make(Plan.DataNode{
             .descr = full_descr,
             .action = .{ .project = .{
                 .input = root,
                 .exprs = scalarNodes,
             } },
-        };
-        root = project_node;
+        });
     }
 
-    // Finally create the statement node
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .insert = .{
+    // Finally make the statement node
+    return p.make(Plan.Statement{ .insert = .{
         .table = table,
         .root = root,
-    } };
-    return result;
+    } });
 }
 
 /// Is the expression a constant?
@@ -344,30 +340,26 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const filter = p.alloc.create(Plan.DataNode) catch oom();
-        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
-        expr.* = try p.planExpression(condition.*, root.descr);
+        const expr = p.make(try p.planExpression(condition.*, root.descr));
 
         if (expr.dbtype != .bool) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
 
-        filter.* = .{
+        root = p.make(Plan.DataNode{
             .descr = root.descr,
             .action = .{ .filter = .{
                 .input = root,
                 .condition = expr,
             } },
-        };
-        root = filter;
+        });
     }
 
     // Add a projection node if needed
     if (need_project) {
         // Build the description
-        const new_descr = p.alloc.create(data.TupleDescriptor) catch oom();
-        new_descr.* = .empty;
+        const new_descr = p.make(data.TupleDescriptor.empty);
         new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.items.len) catch oom();
         for (stmt.columns.items, scalarNodes.items) |c, n| {
             new_descr.attrs.appendAssumeCapacity(.{
@@ -376,22 +368,18 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
             });
         }
 
-        // Create the projection node
-        const project = p.alloc.create(Plan.DataNode) catch oom();
-        project.* = .{
+        // Make the projection node
+        root = p.make(Plan.DataNode{
             .descr = new_descr,
             .action = .{ .project = .{
                 .input = root,
                 .exprs = scalarNodes,
             } },
-        };
-        root = project;
+        });
     }
 
-    // Create the statement node
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .select = .{ .root = root } };
-    return result;
+    // Make the statement node
+    return p.make(Plan.Statement{ .select = .{ .root = root } });
 }
 
 /// Plan DELETE statement
@@ -406,32 +394,27 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const filter = p.alloc.create(Plan.DataNode) catch oom();
-        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
-        expr.* = try p.planExpression(condition.*, root.descr);
+        const expr = p.make(try p.planExpression(condition.*, root.descr));
 
         if (expr.dbtype != .bool) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
 
-        filter.* = .{
+        root = p.make(Plan.DataNode{
             .descr = root.descr,
             .action = .{ .filter = .{
                 .input = root,
                 .condition = expr,
             } },
-        };
-        root = filter;
+        });
     }
 
-    // Create the statement node
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .delete = .{
+    // Make the statement node
+    return p.make(Plan.Statement{ .delete = .{
         .table = table,
         .root = root,
-    } };
-    return result;
+    } });
 }
 
 /// Plan Update statement
@@ -446,23 +429,20 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const filter = p.alloc.create(Plan.DataNode) catch oom();
-        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
-        expr.* = try p.planExpression(condition.*, root.descr);
+        const expr = p.make(try p.planExpression(condition.*, root.descr));
 
         if (expr.dbtype != .bool) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
 
-        filter.* = .{
+        root = p.make(Plan.DataNode{
             .descr = root.descr,
             .action = .{ .filter = .{
                 .input = root,
                 .condition = expr,
             } },
-        };
-        root = filter;
+        });
     }
 
     var cols = std.ArrayList(Plan.ColumnId)
@@ -483,15 +463,13 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
         vals.appendAssumeCapacity(val);
     }
 
-    // Create the statement node
-    const result = p.alloc.create(Plan.Statement) catch oom();
-    result.* = .{ .update = .{
+    // Make the statement node
+    return p.make(Plan.Statement{ .update = .{
         .table = table,
         .root = root,
         .cols = cols,
         .vals = vals,
-    } };
-    return result;
+    } });
 }
 
 /// Plan a data source node.
@@ -508,17 +486,14 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
     // Find the table in question
     const table_id = try p.findTable(table.name);
     // Find its descriptor
-    const descr = p.alloc.create(data.TupleDescriptor) catch oom();
-    descr.* = p.cat.descr.get(table_id).?;
+    const descr = p.make(p.cat.descr.get(table_id).?);
     // Build the data source node
-    const result = p.alloc.create(Plan.DataNode) catch oom();
-    result.* = .{
+    return p.make(Plan.DataNode{
         .descr = descr,
         .action = .{ .full_scan = .{
             .table = table_id,
         } },
-    };
-    return result;
+    });
 }
 
 /// Plan a data source node for VALUES list
@@ -556,12 +531,10 @@ fn planValues(
     }
 
     // Build the data source node
-    const data_node = p.alloc.create(Plan.DataNode) catch oom();
-    data_node.* = .{
+    return p.make(Plan.DataNode{
         .descr = cxt,
         .action = .{ .values = .{ .data = values_data } },
-    };
-    return data_node;
+    });
 }
 
 fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const data.TupleDescriptor) Error!data.DBType {
@@ -655,8 +628,7 @@ fn planExpression(
             };
         },
         .unary => |u| {
-            const child = p.alloc.create(Plan.ScalarNode) catch oom();
-            child.* = try p.planExpression(u.expr.*, cxt);
+            const child = p.make(try p.planExpression(u.expr.*, cxt));
             return Plan.ScalarNode{
                 .action = .{ .unary = .{
                     .op = u.op,
@@ -666,10 +638,8 @@ fn planExpression(
             };
         },
         .binary => |b| {
-            const left = p.alloc.create(Plan.ScalarNode) catch oom();
-            const right = p.alloc.create(Plan.ScalarNode) catch oom();
-            left.* = try p.planExpression(b.left.*, cxt);
-            right.* = try p.planExpression(b.right.*, cxt);
+            const left = p.make(try p.planExpression(b.left.*, cxt));
+            const right = p.make(try p.planExpression(b.right.*, cxt));
             return Plan.ScalarNode{
                 .action = .{ .binary = .{
                     .op = b.op,
