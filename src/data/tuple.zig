@@ -40,6 +40,7 @@
 //! ```
 
 const std = @import("std");
+const ids = @import("../ids.zig");
 const t = @import("types.zig");
 const Value = @import("value.zig").Value;
 const oom = @import("../utils.zig").oom;
@@ -54,21 +55,59 @@ pub const MemTuple = struct {
         descr: *const t.TupleDescriptor,
     };
 
+    /// Additional fields taken from heap table.
+    pub const ExtendedFields = extern struct {
+        xmin: ids.TransactionId,
+        xmax: ids.TransactionId,
+        pos: Pos,
+    };
+
+    /// Position of a tuple in a table.
+    /// Is enough to identify a specific tuple, but could change
+    /// after any table updates.
+    pub const Pos = extern struct {
+        page_id: ids.PageId,
+        index: u16,
+        padding: [6]u8 = .{ 0, 0, 0, 0, 0, 0 },
+
+        pub const none = Pos{
+            .page_id = 0,
+            .index = 0,
+        };
+    };
+
     /// Representation of the memory tuple data.
     /// Note that the actual size of memory tuple is in general
     /// bigger than @sizeOf(Data).
     const Data = extern struct {
         h: Header,
-        // Dummy field to represent array of offsets:
-        // actually contains N+1 offsets for N attributes.
-        // The last offset points after the whole array of data.
-        offsets_start: [1]u16,
+        tail: extern union {
+            // This has two versions: without extended fields or with them
+            normal: Normal,
+            extended: Extended,
+        },
+
+        pub const Normal = extern struct {
+            // Dummy field to represent array of offsets:
+            // actually contains N+1 offsets for N attributes.
+            // The last offset points after the whole array of data.
+            offsets_start: [1]u16,
+        };
+
+        pub const Extended = extern struct {
+            ext: ExtendedFields,
+            // Dummy field to represent array of offsets:
+            // actually contains N+1 offsets for N attributes.
+            // The last offset points after the whole array of data.
+            offsets_start: [1]u16,
+        };
     };
 
     /// Parsed MemTuple, containing all the pointers to the relevant
     /// sections of the MemTuple.
     pub const Details = struct {
         h: *Header,
+        ext: ?*ExtendedFields,
         offsets: []u16,
         data: []u8,
     };
@@ -76,12 +115,20 @@ pub const MemTuple = struct {
     /// Parse MemTuple and obtain its internal details.
     /// Should only really be used internally to convert
     /// between tuple representations.
-    pub fn details(self: MemTuple) Details {
+    pub inline fn details(self: MemTuple) Details {
         const n = self.len();
-        const offsets: [*]u16 = @ptrCast(&self.ptr.offsets_start);
+        const has_ext = self.ptr.h.descr.has_extended;
+
+        const offsets: [*]u16 = if (has_ext)
+            @ptrCast(&self.ptr.tail.extended.offsets_start)
+        else
+            @ptrCast(&self.ptr.tail.normal.offsets_start);
+
+        const ext = if (has_ext) &self.ptr.tail.extended.ext else null;
         const data: [*]u8 = @ptrCast(&offsets[n + 1]);
         return .{
             .h = &self.ptr.h,
+            .ext = ext,
             .offsets = offsets[0 .. n + 1],
             .data = data[0..offsets[n]],
         };
@@ -133,10 +180,15 @@ pub const MemTuple = struct {
         return d.data[start..end];
     }
 
+    pub fn extended(self: MemTuple) *const MemTuple.ExtendedFields {
+        return self.details().ext.?;
+    }
+
     /// Total size of a MemTuple (including header, offset array and actual data).
     pub fn size(self: MemTuple) usize {
         const d = self.details();
         return @sizeOf(MemTuple.Header) +
+            @as(usize, if (d.ext != null) @sizeOf(MemTuple.ExtendedFields) else 0) +
             d.offsets.len * @sizeOf(u16) +
             d.data.len;
     }
@@ -218,6 +270,7 @@ pub const MemTuple = struct {
         ), // Actual data represented as array of bytes
         offset: u16, // Current data offset
         index: usize, // Current attribute index
+        extended: bool, // Did we add extended fields?
 
         /// Current tuple (still in construction)
         fn tuple(b: *Builder) MemTuple {
@@ -226,7 +279,9 @@ pub const MemTuple = struct {
 
         /// Initialize a new builder. TupleDescriptor must be given immediately.
         pub fn init(gpa: std.mem.Allocator, descr: *const t.TupleDescriptor) Builder {
+            const has_ext = descr.has_extended;
             const header_size = @sizeOf(MemTuple.Header) +
+                @as(usize, if (has_ext) @sizeOf(MemTuple.ExtendedFields) else 0) +
                 (descr.attrs.len + 1) * @sizeOf(u16);
             // Array is initialized with approximate capacity.
             var arr = @FieldType(Builder, "arr")
@@ -240,6 +295,7 @@ pub const MemTuple = struct {
                 .arr = arr,
                 .offset = 0,
                 .index = 0,
+                .extended = false,
             };
         }
 
@@ -311,11 +367,20 @@ pub const MemTuple = struct {
             }
         }
 
+        /// Adds extended fields to the tuple.
+        pub fn addExtended(b: *Builder, ext: MemTuple.ExtendedFields) void {
+            std.debug.assert(b.tuple().ptr.h.descr.has_extended);
+            b.tuple().ptr.tail.extended.ext = ext;
+            b.extended = true;
+        }
+
         /// Obtain the finished tuple from the builder.
         /// The builder is then done and no deinit is needed.
         pub fn finalize(b: *Builder) MemTuple {
             // The tuple must actually be finished
             std.debug.assert(b.index == b.tuple().len());
+            if (b.tuple().ptr.h.descr.has_extended)
+                std.debug.assert(b.extended);
             const data = b.arr.toOwnedSlice(b.gpa) catch oom();
             return .{ .ptr = @ptrCast(&data[0]) };
         }

@@ -36,11 +36,26 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
 
     // Build our new tuple
     var b = data.MemTuple.Builder.init(cxt.alloc, plan.descr);
-    // Go through our expressions
-    for (plan.action.project.exprs.items) |expr| {
-        // Evaluate each one and add the result to the output tuple
-        const v = scalar.eval(&expr, input.?);
-        b.pushValue(v);
+    if (plan.action.project.exprs.items.len == 0) {
+        // Special case: simply copy data from input
+        for (0..input.?.len()) |i| {
+            b.pushValue(input.?.getValue(i));
+        }
+    } else {
+        // Go through our expressions
+        for (plan.action.project.exprs.items) |expr| {
+            // Evaluate each one and add the result to the output tuple
+            const v = scalar.eval(&expr, input.?);
+            b.pushValue(v);
+        }
+    }
+    // Add extended fields if needed
+    if (plan.descr.has_extended) {
+        b.addExtended(.{
+            .xmin = cxt.tid,
+            .xmax = .invalid,
+            .pos = .none,
+        });
     }
     return b.finalize();
 }

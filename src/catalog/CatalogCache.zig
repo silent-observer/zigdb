@@ -119,7 +119,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
             self.catalog.zdb_attrs.scan(&.{.attr_rel_id}, &.{rel.rel_id});
 
         // Build the descriptor
-        var descr: t.TupleDescriptor = .{};
+        var descr: t.TupleDescriptor = .emptyExtended;
         while (attr_scanner.next()) |attr| {
             descr.attrs.append(self.gpa, .{
                 .name = attr.attr_name,
@@ -225,7 +225,7 @@ pub fn Table(comptime id: tables.TableId) type {
         }
 
         /// Convert static custom-built Row to a dynamic MemTuple
-        fn rowToMemTuple(row: Row, alloc: std.mem.Allocator) MemTuple {
+        fn rowToMemTuple(row: Row, alloc: std.mem.Allocator, new_tid: ids.TransactionId) MemTuple {
             var builder = MemTuple.Builder.init(
                 alloc,
                 tables.descriptor(id),
@@ -235,6 +235,11 @@ pub fn Table(comptime id: tables.TableId) type {
                 // Put each one into the MemTuple
                 builder.push(f.type, @field(row, f.name));
             }
+            builder.addExtended(.{
+                .xmin = new_tid,
+                .xmax = .invalid,
+                .pos = .none,
+            });
             return builder.finalize();
         }
 
@@ -306,13 +311,13 @@ pub fn Table(comptime id: tables.TableId) type {
                 defer self.index += 1; // Restore it afterwards
 
                 // Convert the new row to a tuple
-                const tuple = rowToMemTuple(new, self.table.arena.allocator());
+                const tuple = rowToMemTuple(new, self.table.arena.allocator(), tid);
 
                 // Replace the tuple in the heap table
                 try heap.Table.init(cache, .{
                     .db = self.table.db_id,
                     .table = @intFromEnum(id),
-                }).updateInPlace(self.index, tuple, tid);
+                }).updateInPlace(self.index, tuple);
 
                 // Replace the tuple in the cache
                 self.table.data.items[self.index].deinit(self.table.arena.allocator());
@@ -439,7 +444,7 @@ pub fn Table(comptime id: tables.TableId) type {
 
         /// Adds a new row to the catalog table
         pub fn add(self: *TSelf, cache: *storage.Cache, row: Row, tid: ids.TransactionId) !void {
-            const tuple = rowToMemTuple(row, self.arena.allocator());
+            const tuple = rowToMemTuple(row, self.arena.allocator(), tid);
 
             // Add the row to the heap table
             try heap.Table.init(
@@ -448,7 +453,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     .db = self.db_id,
                     .table = @intFromEnum(id),
                 },
-            ).addOneTuple(tuple, tid);
+            ).addOneTuple(tuple);
 
             // Add the row to the cache too
             self.data.append(self.arena.allocator(), tuple) catch oom();
@@ -499,22 +504,6 @@ fn createRaw(
         .table = @intFromEnum(table_id),
     };
     try heap.Table.init(cache, id).create();
-}
-
-/// Add a row to a new heap table without initializing the cache first.
-fn addRaw(
-    arena: std.mem.Allocator,
-    cache: *storage.Cache,
-    db_id: ids.DatabaseId,
-    comptime table_id: tables.TableId,
-    row: tables.Entry(table_id),
-) !void {
-    const id = ids.FullTableId{
-        .db = db_id,
-        .table = @intFromEnum(table_id),
-    };
-    const tuple = Table(table_id).rowToMemTuple(row, arena);
-    try heap.Table.init(cache, id).addOneTuple(tuple, .frozen);
 }
 
 /// Create the catalog from scratch

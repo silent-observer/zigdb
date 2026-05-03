@@ -134,20 +134,19 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     // List of expressions for projection
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
-    _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.attrs.len);
 
     // This is the descriptor of what we get as input data
-    var input_descr = full_descr;
-    var need_project = false;
+    const input_descr = p.alloc.create(data.TupleDescriptor) catch oom();
     if (stmt.columns.items.len > 0) {
         // If the user specified the list of columns, we might need to reorder them for storage.
-        input_descr = p.alloc.create(data.TupleDescriptor) catch oom();
         input_descr.* = .empty;
         input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.items.len) catch oom();
         if (stmt.columns.items.len != full_descr.attrs.len) {
             p.addError("Partial insert is not yet supported", .{});
             return Error.NotSupported;
         }
+
+        _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.attrs.len);
 
         // Go through the columns in the statement
         for (stmt.columns.items, 0..) |col_name, i| {
@@ -157,9 +156,6 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                 p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ col_name, stmt.name });
                 return Error.UnknownName;
             }
-            // If they don't match, we need a projection node
-            if (col_id.? != i)
-                need_project = true;
             // Build the descriptor for the input data we get from VALUES part of the query
             input_descr.attrs.appendAssumeCapacity(full_descr.attrs.get(col_id.?));
             // Build an expression for each physical column
@@ -168,11 +164,15 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                 .dbtype = full_descr.attrs.get(col_id.?).t,
             };
         }
+    } else {
+        input_descr.* = full_descr.clone(p.alloc);
+        input_descr.has_extended = false;
     }
 
     // Plan the VALUES data source
     var root = try p.planValues(&stmt.values, input_descr);
-    if (need_project) {
+    // We always need a projection node to add extended fields
+    {
         // Add the projection node on top of VALUES, if needed
         const project_node = p.alloc.create(Plan.DataNode) catch oom();
         project_node.* = .{

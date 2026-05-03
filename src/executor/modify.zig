@@ -23,7 +23,7 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
                 .db = cxt.db_id,
                 .table = stmt.table,
             },
-        ).addOneTuple(tuple, cxt.tid);
+        ).addOneTuple(tuple);
     }
 }
 

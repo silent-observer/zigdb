@@ -48,6 +48,6 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
     const state: *State = @ptrCast(@alignCast(plan.state.?));
     // Just fetch one tuple from the scanner
     if (try state.scanner.next(cxt.alloc)) |tuple| {
-        return tuple.tuple;
+        return tuple;
     } else return null;
 }

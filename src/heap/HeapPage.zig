@@ -60,14 +60,19 @@ page: *Page.Data,
 
 /// Contains `count` offsets for `count` tuples.
 offsets: []u16,
+page_id: Page.Id,
 
 /// Parse a HeapPage from a raw Page.
-pub fn parse(page: *Page.Data) HeapPage {
+pub fn parse(page: *Page.Data, page_id: Page.Id) HeapPage {
     const h: [*]PageHeader = @ptrCast(&page.d);
     const offsets_ptr: [*]u16 = @ptrCast(&h[1]);
     const offsets = offsets_ptr[0..h[0].count];
 
-    return .{ .page = page, .offsets = offsets };
+    return .{
+        .page = page,
+        .offsets = offsets,
+        .page_id = page_id,
+    };
 }
 
 pub fn count(self: *const HeapPage) usize {
@@ -141,10 +146,13 @@ const HeapTuple = struct {
         self: HeapTuple,
         descr: *const t.TupleDescriptor,
         alloc: std.mem.Allocator,
-    ) ExtendedMemTuple {
+        pos: MemTuple.Pos,
+    ) MemTuple {
+        std.debug.assert(descr.has_extended);
         std.debug.assert(self.ptr.h.count == descr.attrs.len);
         const d = self.details();
         const mem_tuple_size = @sizeOf(MemTuple.Header) +
+            @sizeOf(MemTuple.ExtendedFields) +
             d.offsets.len * @sizeOf(u16) +
             d.data.len;
 
@@ -158,16 +166,19 @@ const HeapTuple = struct {
         mem_tuple.ptr.h.descr = descr;
 
         // Copy the actual offsets and data to the MemTuple.
-        const dest_offsets_ptr: [*]u16 = @ptrCast(&mem_tuple.ptr.offsets_start);
+        const dest_offsets_ptr: [*]u16 = @ptrCast(&mem_tuple.ptr.tail.extended.offsets_start);
         const dest_data_ptr: [*]u8 = @ptrCast(&dest_offsets_ptr[self.ptr.h.count + 1]);
         @memcpy(dest_offsets_ptr, d.offsets);
         @memcpy(dest_data_ptr, d.data);
 
-        return .{
-            .tuple = mem_tuple,
+        // Fill extended fields
+        mem_tuple.ptr.tail.extended.ext = .{
             .xmin = self.ptr.h.xmin,
             .xmax = self.ptr.h.xmax,
+            .pos = pos,
         };
+
+        return mem_tuple;
     }
 
     /// Calculate the expected size of a MemTuple if it's written onto disk.
@@ -181,17 +192,18 @@ const HeapTuple = struct {
     /// Serialize a MemTuple as a HeapTuple.
     /// The destination must have exact amount of space to fit the tuple.
     /// That can be calculated with expectedSize()
-    fn write(mem: ExtendedMemTuple, dest: []u8) void {
+    /// pos extended field is ignored.
+    fn write(mem: MemTuple, dest: []u8) void {
         // Ensure the size matches
-        std.debug.assert(dest.len == expectedSize(mem.tuple));
-        const d = mem.tuple.details();
-        const mem_len = mem.tuple.len();
+        std.debug.assert(dest.len == expectedSize(mem));
+        const d = mem.details();
+        const mem_len = mem.len();
 
         const dest_tuple: HeapTuple = .{ .ptr = @ptrCast(dest) };
         dest_tuple.ptr.h = .{
             .count = @intCast(mem_len),
-            .xmin = mem.xmin,
-            .xmax = mem.xmax,
+            .xmin = mem.ptr.tail.extended.ext.xmin,
+            .xmax = mem.ptr.tail.extended.ext.xmax,
         };
 
         const dest_offsets_ptr: [*]align(1) u16 = @ptrCast(&dest_tuple.ptr.offsets_start);
@@ -199,12 +211,6 @@ const HeapTuple = struct {
         @memcpy(dest_offsets_ptr, d.offsets);
         @memcpy(dest_data_ptr, d.data);
     }
-};
-
-pub const ExtendedMemTuple = struct {
-    tuple: MemTuple,
-    xmin: ids.TransactionId,
-    xmax: ids.TransactionId,
 };
 
 /// Get pointer to raw data of i-th tuple on the page.
@@ -220,9 +226,12 @@ pub fn read(
     i: u16,
     descr: *const t.TupleDescriptor,
     alloc: std.mem.Allocator,
-) ExtendedMemTuple {
+) MemTuple {
     const tuple = self.getHeapTuple(i);
-    return tuple.read(descr, alloc);
+    return tuple.read(descr, alloc, .{
+        .page_id = self.page_id,
+        .index = i,
+    });
 }
 
 /// Check if i-th tuple on HeapPage can be updated with a new MemTuple.
@@ -251,8 +260,10 @@ pub fn fits(self: *const HeapPage, tuple: MemTuple) bool {
 
 /// Put a new MemTuple on this HeapPage. The offset is placed at the end of
 /// the offset array.
-pub fn add(self: *HeapPage, tuple: ExtendedMemTuple) void {
-    std.debug.assert(self.fits(tuple.tuple));
+/// pos extended field in MemTuple is ignored.
+pub fn add(self: *HeapPage, tuple: MemTuple) void {
+    std.debug.assert(self.fits(tuple));
+    std.debug.assert(tuple.ptr.h.descr.has_extended);
 
     // Offset of a last tuple on the page
     const last_offset = if (self.offsets.len == 0)
@@ -261,7 +272,7 @@ pub fn add(self: *HeapPage, tuple: ExtendedMemTuple) void {
         self.offsets[self.offsets.len - 1];
     // The offset of the new tuple is *less* than the last one, and
     // the space between them must fit the heap tuple.
-    const new_offset = last_offset - HeapTuple.expectedSize(tuple.tuple);
+    const new_offset = last_offset - HeapTuple.expectedSize(tuple);
 
     HeapTuple.write(tuple, self.page.d[new_offset..last_offset]);
     self.offsets.len += 1;
@@ -272,16 +283,13 @@ pub fn add(self: *HeapPage, tuple: ExtendedMemTuple) void {
 /// Update the i-th tuple on HeapPage with a new MemTuple.
 /// This can be done if the new data fits into the space currently taken
 /// by old data, which can be checked with canUpdateInPlace.
-pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple, tid: ids.TransactionId) void {
+pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple) void {
     std.debug.assert(self.canUpdateInPlace(i, new));
+    std.debug.assert(new.ptr.h.descr.has_extended);
     const tuple = self.getHeapTuple(i);
     const raw: [*]u8 = @ptrCast(tuple.ptr);
     // The space currently occupied by the tuple.
     const dest = raw[0..tuple.heapSize()];
     @memset(dest, 0);
-    HeapTuple.write(.{
-        .tuple = new,
-        .xmin = tid,
-        .xmax = .invalid,
-    }, dest);
+    HeapTuple.write(new, dest);
 }

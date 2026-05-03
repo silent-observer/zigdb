@@ -185,7 +185,7 @@ fn fillAttrData() std.EnumArray(SystemAttribute, AttributeData) {
 fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, t.TupleDescriptor) {
     var result = std.EnumArray(TableId, t.TupleDescriptor).initUndefined();
     inline for (Tables) |r| {
-        var descr = t.TupleDescriptor.empty;
+        var descr = t.TupleDescriptor.emptyExtended;
         descr.attrs.ensureUnusedCapacity(gpa, r.attrs.len) catch oom();
         inline for (r.attrs) |a| {
             descr.attrs.appendAssumeCapacity(.{

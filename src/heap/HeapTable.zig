@@ -118,7 +118,7 @@ pub fn readHeader(self: HeapTable) !Header {
 }
 
 /// Add a new tuple to the HeapTable.
-pub fn addOneTuple(self: HeapTable, tuple: MemTuple, tid: ids.TransactionId) !void {
+pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
     const header = try self.readHeader();
 
     // Go through pages to find a page that can fit this new tuple.
@@ -132,7 +132,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, tid: ids.TransactionId) !vo
         defer self.cache.unpin(raw_page);
 
         // Check if the tuple would fit
-        const page = HeapPage.parse(raw_page.page);
+        const page = HeapPage.parse(raw_page.page, @intCast(page_id));
         if (page.fits(tuple))
             break :page_id @intCast(page_id);
     } else try self.addPage();
@@ -144,13 +144,9 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, tid: ids.TransactionId) !vo
             .page = page_id,
         });
         defer self.cache.unpin(raw_page);
-        var page = HeapPage.parse(raw_page.page);
+        var page = HeapPage.parse(raw_page.page, page_id);
 
-        page.add(.{
-            .tuple = tuple,
-            .xmin = tid,
-            .xmax = .invalid,
-        });
+        page.add(tuple);
     }
 
     // Update the number of tuples on the header page
@@ -168,7 +164,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, tid: ids.TransactionId) !vo
 /// Update the tuple directly on the page.
 /// Care must be taken to ensure that the new data isn't bigger in size
 /// than old data.
-pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple, tid: ids.TransactionId) !void {
+pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
     const header = try self.readHeader();
 
     // How many tuples we already skipped
@@ -182,7 +178,7 @@ pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple, tid: ids.Transact
         });
         defer self.cache.unpin(raw_page);
 
-        const page = HeapPage.parse(raw_page.page);
+        const page = HeapPage.parse(raw_page.page, @intCast(page_id));
         if (i < counter + page.offsets.len)
             // If the tuple index is on this page, we're done
             break :page_id @intCast(page_id)
@@ -198,11 +194,11 @@ pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple, tid: ids.Transact
             .page = page_id,
         });
         defer self.cache.unpin(raw_page);
-        var page = HeapPage.parse(raw_page.page);
+        var page = HeapPage.parse(raw_page.page, page_id);
 
         // Check that we can actually update the tuple
         if (!page.canUpdateInPlace(@intCast(i - counter), tuple))
             @panic("Cannot actually update in place!");
-        page.updateInPlace(@intCast(i - counter), tuple, tid);
+        page.updateInPlace(@intCast(i - counter), tuple);
     }
 }

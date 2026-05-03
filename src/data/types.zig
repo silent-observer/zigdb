@@ -102,9 +102,16 @@ pub const AttributeDescriptor = struct {
 /// Contains types and names of all attributes.
 pub const TupleDescriptor = struct {
     attrs: std.MultiArrayList(AttributeDescriptor) = .empty,
+    /// Does the tuple contain extended attributes? (xmin, xmax, pos etc.)
+    has_extended: bool = false,
 
     pub const empty = TupleDescriptor{
         .attrs = .empty,
+        .has_extended = false,
+    };
+    pub const emptyExtended = TupleDescriptor{
+        .attrs = .empty,
+        .has_extended = true,
     };
 
     /// Clone the TupleDescriptor.

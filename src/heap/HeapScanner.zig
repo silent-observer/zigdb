@@ -74,7 +74,7 @@ fn advanceToNonEmpty(self: *HeapScanner) !bool {
                 .file = self.table_id.fullFileId(),
                 .page = self.page_id,
             });
-            self.parsed_page = HeapPage.parse(self.page.?.page);
+            self.parsed_page = HeapPage.parse(self.page.?.page, self.page_id);
         }
 
         // If the page has tuple, we found what we were looking for
@@ -104,14 +104,15 @@ fn advanceOne(self: *HeapScanner) !void {
     self.closePage();
 }
 
-fn tupleVisible(self: *HeapScanner, tuple: ExtendedMemTuple) !bool {
-    const creation_visible = try self.snapshot.changesVisible(tuple.xmin);
-    const deletion_visible = try self.snapshot.changesVisible(tuple.xmax);
+fn tupleVisible(self: *HeapScanner, tuple: MemTuple) !bool {
+    const ext = tuple.extended();
+    const creation_visible = try self.snapshot.changesVisible(ext.xmin);
+    const deletion_visible = try self.snapshot.changesVisible(ext.xmax);
     return creation_visible and !deletion_visible;
 }
 
 /// Get the next tuple, allocating it with the given Allocator.
-pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?ExtendedMemTuple {
+pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?MemTuple {
     while (true) {
         // Ensure we have a valid non-empty page
         if (!try self.advanceToNonEmpty())
