@@ -22,7 +22,7 @@ page_id: ids.PageId, // Current page id
 tuple_index: u16, // Current tuple index on the page
 page_count: u32, // Total number of pages
 tuple_count: u64, // Total number of tuples
-page: ?storage.Cache.LockedPage, // Current page the scanner is reading
+page: ?storage.Cache.PinnedPage, // Current page the scanner is reading
 parsed_page: ?HeapPage, // Current page in its parsed state
 cache: *storage.Cache,
 snapshot: *const transaction.Snapshot,
@@ -52,12 +52,12 @@ pub fn init(
 
 /// Deinitialize the new Scanner, closing the pages
 pub fn deinit(self: *HeapScanner) void {
-    if (self.page) |p| self.cache.unlock(p);
+    if (self.page) |p| self.cache.unpin(p);
 }
 
 /// Manually close the current page
 fn closePage(self: *HeapScanner) void {
-    self.cache.unlock(self.page.?);
+    self.cache.unpin(self.page.?);
     self.page = null;
     self.parsed_page = null;
 }

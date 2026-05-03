@@ -22,12 +22,13 @@ const Cache = @This();
 /// Internal status of a page
 const PageStatus = struct {
     dirty: bool = false,
-    lock: std.Io.RwLock = std.Io.RwLock.init,
+    write_pins: u8 = 0,
+    read_pins: u8 = 0,
 };
 
-/// Page data after the lock is taken in the cache.
+/// Page data after the pin is taken in the cache.
 /// This has enough data to unlock the page afterwards.
-pub const LockedPage = struct {
+pub const PinnedPage = struct {
     page: *RawDataFile.Page.Data,
     id: ids.FullPageId,
     writeable: bool,
@@ -70,13 +71,13 @@ pub fn deinit(self: *Cache) void {
 }
 
 /// Fetch a page (either read-only or read-write).
-/// Also takes a lock for this page.
-/// unlock must eventually be called on this page to avoid lock leaks.
+/// Also takes a pin for this page.
+/// unpin must eventually be called on this page to avoid pin leaks.
 fn fetch(
     self: *Cache,
     id: ids.FullPageId,
     writeable: bool,
-) !LockedPage {
+) !PinnedPage {
     // Try to get the file or create the entry for it if it isn't opened
     const file = self.files.getOrPut(self.gpa, id.file) catch oom();
     // Remove the entry if anything goes wrong
@@ -97,14 +98,22 @@ fn fetch(
         status.value_ptr.* = .{};
     }
 
-    // Take the read-write or read-only lock
     if (writeable) {
-        try status.value_ptr.lock.lock(self.io);
+        // Take the pin
+        std.debug.assert(status.value_ptr.write_pins < 0xFF);
+        status.value_ptr.write_pins += 1;
         // If we intend to write to the page, we will have to flush it later
         status.value_ptr.dirty = true;
     } else {
-        try status.value_ptr.lock.lockShared(self.io);
-    }
+        // Take the pin
+        std.debug.assert(status.value_ptr.read_pins < 0xFF);
+        status.value_ptr.read_pins += 1;
+    } // Remove the pin if anything goes wrong
+    errdefer if (writeable) {
+        status.value_ptr.write_pins -= 1;
+    } else {
+        status.value_ptr.read_pins -= 1;
+    };
 
     // Try to get the page status or create the entry if it isn't in the cache
     const page = self.pages.getOrPut(self.gpa, id) catch oom();
@@ -115,7 +124,7 @@ fn fetch(
         try rdf.read(id.page, page.value_ptr);
     }
 
-    // Form the LockedPage to return
+    // Form the PinnedPage to return
     return .{
         .page = page.value_ptr,
         .id = id,
@@ -123,26 +132,43 @@ fn fetch(
     };
 }
 
-/// Unlock the page.
-pub fn unlock(
+/// Unpin the page.
+pub fn unpin(
     self: *Cache,
-    locked_page: LockedPage,
+    pinned_page: PinnedPage,
 ) void {
-    // We assume you can't lock a page if it doesn't exist.
-    const status = self.page_status.getPtr(locked_page.id).?;
-    // Undo the read-write or read-only lock.
-    if (locked_page.writeable) {
-        status.lock.unlock(self.io);
+    // We assume you can't pin a page if it doesn't exist
+    const status = self.page_status.getPtr(pinned_page.id).?;
+    // Undo the pin
+    if (pinned_page.writeable) {
+        std.debug.assert(status.write_pins > 0);
+        status.write_pins -= 1;
     } else {
-        status.lock.unlockShared(self.io);
+        std.debug.assert(status.read_pins > 0);
+        status.read_pins -= 1;
     }
+}
+
+/// Upgrade the pin to writeable.
+pub fn upgrade(
+    self: *Cache,
+    pinned_page: *PinnedPage,
+) void {
+    if (pinned_page.writeable) return;
+    // We assume you can't pin a page if it doesn't exist
+    const status = self.page_status.getPtr(pinned_page.id).?;
+    // Move the pin
+    std.debug.assert(status.read_pins < 0xFF);
+    std.debug.assert(status.write_pins > 0);
+    status.read_pins += 1;
+    status.write_pins -= 1;
 }
 
 /// Get a read-only page.
 pub fn get(
     self: *Cache,
     id: ids.FullPageId,
-) !LockedPage {
+) !PinnedPage {
     return try self.fetch(id, false);
 }
 
@@ -150,15 +176,17 @@ pub fn get(
 pub fn getWriteable(
     self: *Cache,
     id: ids.FullPageId,
-) !LockedPage {
+) !PinnedPage {
     return try self.fetch(id, true);
 }
 
 /// Flush all dirty pages in the cache to disk.
-pub fn flush(self: *Cache) !void {
+pub fn flush(self: *Cache, force: bool) !void {
     var iter = self.page_status.iterator();
     while (iter.next()) |e| {
         if (e.value_ptr.dirty) {
+            if (!force and e.value_ptr.write_pins > 0)
+                continue;
             const file = self.files.get(e.key_ptr.file) orelse unreachable;
             const data = self.pages.getPtr(e.key_ptr.*) orelse unreachable;
             try file.write(e.key_ptr.page, data);

@@ -26,6 +26,7 @@ pub fn main(init: std.process.Init) !void {
         "/tmp/datadir",
     );
     defer storage_cache.deinit(); // Don't forget to deinitialize
+    defer storage_cache.flush(true) catch {};
 
     // Initialize and rebuild the catalog cache
     var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1, &storage_cache);
@@ -64,7 +65,7 @@ pub fn main(init: std.process.Init) !void {
             &transaction_log,
             line.written(),
         ) catch {};
-        try storage_cache.flush();
+        try storage_cache.flush(false);
 
         // Clear the command writer for the next command
         line.clearRetainingCapacity();

@@ -42,7 +42,7 @@ fn split(tid: ids.TransactionId) Address {
 pub fn get(self: *TransactionLog, tid: ids.TransactionId) !transaction.Status {
     const addr = split(tid);
     const page = try self.storage_cache.get(addr.page_id);
-    defer self.storage_cache.unlock(page);
+    defer self.storage_cache.unpin(page);
 
     const byte = page.page.d[addr.byte_index];
     return @enumFromInt((byte >> addr.bit_shift) & 0x3);
@@ -51,7 +51,7 @@ pub fn get(self: *TransactionLog, tid: ids.TransactionId) !transaction.Status {
 pub fn set(self: *TransactionLog, tid: ids.TransactionId, status: transaction.Status) !void {
     const addr = split(tid);
     const page = try self.storage_cache.getWriteable(addr.page_id);
-    defer self.storage_cache.unlock(page);
+    defer self.storage_cache.unpin(page);
 
     const byte = &page.page.d[addr.byte_index];
     const mask: u8 = @as(u8, 0x3) << addr.bit_shift;
