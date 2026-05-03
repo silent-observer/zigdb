@@ -152,6 +152,7 @@ pub fn parse(p: *Parser) ast.Statement {
 /// Statement = Select
 ///           | Insert
 ///           | Delete
+///           | Update
 ///           | Create
 ///           | Truncate
 /// ```
@@ -161,6 +162,7 @@ fn parseStmt(p: *Parser) ast.Statement {
         .select => return p.parseSelect(),
         .insert => return p.parseInsert(),
         .delete => return p.parseDelete(),
+        .update => return p.parseUpdate(),
         .create => return p.parseCreate(),
         .truncate => return p.parseTruncate(),
         else => {},
@@ -215,6 +217,51 @@ fn parseDelete(p: *Parser) ast.Statement {
         .name = name,
         .where = condition,
     } };
+}
+
+/// Parse an UPDATE statement
+/// ```
+/// Update = "UPDATE" Name "SET" CommaList(SetClause) ("WHERE" Expression)? ";"
+/// ```
+fn parseUpdate(p: *Parser) ast.Statement {
+    p.expectKeyword(.update) catch return .err;
+    const name = p.parseName() catch return .err;
+    p.expectKeyword(.set) catch return .err;
+
+    const clauses =
+        p.parseCommaListErr(
+            ast.Statement.Update.SetClause,
+            parseSetClause,
+        ) catch return .err;
+
+    const condition = if (p.eat(.{ .keyword = .where })) block: {
+        const expr = p.alloc.create(ast.Expression) catch oom();
+        expr.* = p.parseExpression();
+        break :block expr;
+    } else null;
+
+    p.expectSymbol(.semi) catch return .err;
+
+    return .{ .update = .{
+        .name = name,
+        .clauses = clauses,
+        .where = condition,
+    } };
+}
+
+/// Parse an SET clause for UPDATE statement
+/// ```
+/// SetClause = Name "=" Expression
+/// ```
+fn parseSetClause(p: *Parser) InternalError!ast.Statement.Update.SetClause {
+    const column = try p.parseName();
+    try p.expectSymbol(.eq);
+    const expr = p.alloc.create(ast.Expression) catch oom();
+    expr.* = p.parseExpression();
+    return .{
+        .column = column,
+        .expr = expr,
+    };
 }
 
 /// Parse a comma-separated list.

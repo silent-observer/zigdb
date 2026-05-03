@@ -7,6 +7,7 @@ pub const Statement = union(enum) {
     select: Select,
     delete: Delete,
     insert_values: InsertValues,
+    update: Update,
     create_table: CreateTable,
     drop_table: DropTable,
     truncate: Truncate,
@@ -27,6 +28,17 @@ pub const Statement = union(enum) {
         name: Name,
         columns: std.ArrayList(Name),
         values: std.ArrayList(ValueList),
+    };
+
+    pub const Update = struct {
+        name: Name,
+        clauses: std.ArrayList(SetClause),
+        where: ?*Expression,
+
+        pub const SetClause = struct {
+            column: Name,
+            expr: *Expression,
+        };
     };
 
     pub const CreateTable = struct {

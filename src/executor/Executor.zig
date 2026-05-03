@@ -30,6 +30,7 @@ pub fn execute(
         .select => try executeSelect(stmt.select, cxt),
         .truncate => try modify.executeTruncate(stmt.truncate, cxt),
         .delete => try modify.executeDelete(stmt.delete, cxt),
+        .update => try modify.executeUpdate(stmt.update, cxt),
         .drop_table => unreachable,
     }
 }

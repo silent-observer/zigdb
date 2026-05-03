@@ -5,7 +5,10 @@ const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
 const ids = @import("../ids.zig");
 const heap = @import("../heap.zig");
+const data = @import("../data.zig");
+const scalar = @import("scalar.zig");
 const Executor = @import("Executor.zig");
+const oom = @import("../utils.zig").oom;
 
 /// Execute INSERT statement
 pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
@@ -44,6 +47,54 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
                 .table = stmt.table,
             },
         ).deleteTupleAt(tuple.extended().pos, cxt.tid);
+    }
+}
+
+/// Execute UPDATE statement
+pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
+    // Initialize the source data node
+    try Executor.initDataNode(stmt.root, cxt);
+    // Don't forget to deinitialize it at the end
+    defer Executor.deinitDataNode(stmt.root, cxt);
+
+    // Temporary tuple for updates
+    const temp_tuple = cxt.alloc.alloc(
+        data.Value,
+        stmt.root.descr.attrs.len,
+    ) catch oom();
+    defer cxt.alloc.free(temp_tuple);
+
+    // Fetch input tuples one by one
+    while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
+        const table_id = ids.FullTableId{
+            .db = cxt.db_id,
+            .table = stmt.table,
+        };
+        // Delete them from the table
+        try heap.Table.init(cxt.storage_cache, table_id)
+            .deleteTupleAt(tuple.extended().pos, cxt.tid);
+        // Fill the temporary tuple with them
+        for (0..tuple.len()) |i| {
+            temp_tuple[i] = tuple.getValue(i);
+        }
+        // Run the updates
+        for (stmt.cols.items, stmt.vals.items) |col, val| {
+            temp_tuple[col] = scalar.eval(&val, tuple);
+        }
+        // Build the new tuple
+        var b = data.MemTuple.Builder.init(cxt.alloc, stmt.root.descr);
+        for (temp_tuple) |v| {
+            b.pushValue(v);
+        }
+        b.addExtended(.{
+            .xmin = cxt.tid,
+            .xmax = .invalid,
+            .pos = .none,
+        });
+        const new_tuple = b.finalize();
+        // Insert it back into the table
+        _ = try heap.Table.init(cxt.storage_cache, table_id)
+            .addOneTuple(new_tuple);
     }
 }
 

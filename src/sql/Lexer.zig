@@ -38,6 +38,8 @@ pub const Token = struct {
         insert,
         into,
         delete,
+        update,
+        set,
         values,
         create,
         table,

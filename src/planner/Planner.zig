@@ -43,6 +43,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
         .select => return p.planSelect(stmt.select),
         .delete => return p.planDelete(stmt.delete),
         .insert_values => return p.planInsertValues(stmt.insert_values),
+        .update => return p.planUpdate(stmt.update),
         .truncate => return p.planTruncate(stmt.truncate),
         .err => unreachable,
     }
@@ -429,6 +430,66 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     result.* = .{ .delete = .{
         .table = table,
         .root = root,
+    } };
+    return result;
+}
+
+/// Plan Update statement
+fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
+    // Plan the data source for input
+    const table = try p.findTable(stmt.name);
+    const input_node = try p.planDataSource(.{
+        .table = .{ .name = stmt.name },
+    });
+
+    // This is the input data
+    var root = input_node;
+    // Add a filter if we have a WHERE clause
+    if (stmt.where) |condition| {
+        const filter = p.alloc.create(Plan.DataNode) catch oom();
+        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
+        expr.* = try p.planExpression(condition.*, root.descr);
+
+        if (expr.dbtype != .bool) {
+            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
+            return Error.TypeError;
+        }
+
+        filter.* = .{
+            .descr = root.descr,
+            .action = .{ .filter = .{
+                .input = root,
+                .condition = expr,
+            } },
+        };
+        root = filter;
+    }
+
+    var cols = std.ArrayList(Plan.ColumnId)
+        .initCapacity(p.alloc, stmt.clauses.items.len) catch oom();
+    var vals = std.ArrayList(Plan.ScalarNode)
+        .initCapacity(p.alloc, stmt.clauses.items.len) catch oom();
+
+    for (stmt.clauses.items) |clause| {
+        const col_id = root.descr.findAttribute(clause.column);
+        if (col_id == null) {
+            p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column, stmt.name });
+            return Error.UnknownName;
+        }
+
+        const val = try p.planExpression(clause.expr.*, root.descr);
+
+        cols.appendAssumeCapacity(@intCast(col_id.?));
+        vals.appendAssumeCapacity(val);
+    }
+
+    // Create the statement node
+    const result = p.alloc.create(Plan.Statement) catch oom();
+    result.* = .{ .update = .{
+        .table = table,
+        .root = root,
+        .cols = cols,
+        .vals = vals,
     } };
     return result;
 }

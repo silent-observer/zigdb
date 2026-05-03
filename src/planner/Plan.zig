@@ -14,6 +14,7 @@ pub const Statement = union(enum) {
     select: Select,
     insert: Insert,
     delete: Delete,
+    update: Update,
     create_table: CreateTable,
     drop_table: DropTable,
     truncate: Truncate,
@@ -35,6 +36,17 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Source of the data
         root: *DataNode,
+    };
+
+    pub const Update = struct {
+        /// Table to update rows in
+        table: ids.TableId,
+        /// Source of the data
+        root: *DataNode,
+        /// Columns that need updating
+        cols: std.ArrayList(ColumnId),
+        /// Expressions for columns
+        vals: std.ArrayList(ScalarNode),
     };
 
     pub const CreateTable = struct {
