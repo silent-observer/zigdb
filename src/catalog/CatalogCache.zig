@@ -252,6 +252,8 @@ pub fn Table(comptime id: tables.TableId) type {
             table: *TSelf,
             // Current index in the table
             index: usize,
+            // Last returned Pos
+            last_pos: MemTuple.Pos = .none,
 
             // Indexes of filtered uint4 attributes
             keys: []const u8,
@@ -296,6 +298,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     }
                     // Everything matched, return this tuple
                     self.index += 1;
+                    self.last_pos = tuple.extended().pos;
                     return memTupleToRow(tuple);
                 }
                 // Reached the end of the table
@@ -306,18 +309,15 @@ pub fn Table(comptime id: tables.TableId) type {
             /// Note: you are not allowed to increase the size of the data in the row,
             /// since the update is performed in place.
             pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row, tid: ids.TransactionId) !void {
-                // The previously returned index
-                self.index -= 1;
-                defer self.index += 1; // Restore it afterwards
-
                 // Convert the new row to a tuple
                 const tuple = rowToMemTuple(new, self.table.arena.allocator(), tid);
+                tuple.extended().pos = self.last_pos;
 
                 // Replace the tuple in the heap table
                 try heap.Table.init(cache, .{
                     .db = self.table.db_id,
                     .table = @intFromEnum(id),
-                }).updateInPlace(self.index, tuple);
+                }).updateInPlace(tuple);
 
                 // Replace the tuple in the cache
                 self.table.data.items[self.index].deinit(self.table.arena.allocator());
@@ -447,13 +447,14 @@ pub fn Table(comptime id: tables.TableId) type {
             const tuple = rowToMemTuple(row, self.arena.allocator(), tid);
 
             // Add the row to the heap table
-            try heap.Table.init(
+            const pos = try heap.Table.init(
                 cache,
                 .{
                     .db = self.db_id,
                     .table = @intFromEnum(id),
                 },
             ).addOneTuple(tuple);
+            tuple.extended().pos = pos;
 
             // Add the row to the cache too
             self.data.append(self.arena.allocator(), tuple) catch oom();

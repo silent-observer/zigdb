@@ -13,6 +13,7 @@ pub const ColumnId = u16;
 pub const Statement = union(enum) {
     select: Select,
     insert: Insert,
+    delete: Delete,
     create_table: CreateTable,
     drop_table: DropTable,
     truncate: Truncate,
@@ -24,6 +25,13 @@ pub const Statement = union(enum) {
 
     pub const Insert = struct {
         /// Table to insert rows into
+        table: ids.TableId,
+        /// Source of the data
+        root: *DataNode,
+    };
+
+    pub const Delete = struct {
+        /// Table to delete rows from
         table: ids.TableId,
         /// Source of the data
         root: *DataNode,

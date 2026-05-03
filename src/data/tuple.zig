@@ -180,7 +180,7 @@ pub const MemTuple = struct {
         return d.data[start..end];
     }
 
-    pub fn extended(self: MemTuple) *const MemTuple.ExtendedFields {
+    pub fn extended(self: MemTuple) *MemTuple.ExtendedFields {
         return self.details().ext.?;
     }
 

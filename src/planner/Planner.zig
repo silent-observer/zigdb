@@ -41,6 +41,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
         .create_table => return p.planCreateTable(stmt.create_table),
         .drop_table => return p.planDropTable(stmt.drop_table),
         .select => return p.planSelect(stmt.select),
+        .delete => return p.planDelete(stmt.delete),
         .insert_values => return p.planInsertValues(stmt.insert_values),
         .truncate => return p.planTruncate(stmt.truncate),
         .err => unreachable,
@@ -389,6 +390,46 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     // Create the statement node
     const result = p.alloc.create(Plan.Statement) catch oom();
     result.* = .{ .select = .{ .root = root } };
+    return result;
+}
+
+/// Plan DELETE statement
+fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
+    // Plan the data source for input
+    const table = try p.findTable(stmt.name);
+    const input_node = try p.planDataSource(.{
+        .table = .{ .name = stmt.name },
+    });
+
+    // This is the input data
+    var root = input_node;
+    // Add a filter if we have a WHERE clause
+    if (stmt.where) |condition| {
+        const filter = p.alloc.create(Plan.DataNode) catch oom();
+        const expr = p.alloc.create(Plan.ScalarNode) catch oom();
+        expr.* = try p.planExpression(condition.*, root.descr);
+
+        if (expr.dbtype != .bool) {
+            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
+            return Error.TypeError;
+        }
+
+        filter.* = .{
+            .descr = root.descr,
+            .action = .{ .filter = .{
+                .input = root,
+                .condition = expr,
+            } },
+        };
+        root = filter;
+    }
+
+    // Create the statement node
+    const result = p.alloc.create(Plan.Statement) catch oom();
+    result.* = .{ .delete = .{
+        .table = table,
+        .root = root,
+    } };
     return result;
 }
 

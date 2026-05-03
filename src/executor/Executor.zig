@@ -29,7 +29,8 @@ pub fn execute(
         .insert => try modify.executeInsert(stmt.insert, cxt),
         .select => try executeSelect(stmt.select, cxt),
         .truncate => try modify.executeTruncate(stmt.truncate, cxt),
-        else => unreachable,
+        .delete => try modify.executeDelete(stmt.delete, cxt),
+        .drop_table => unreachable,
     }
 }
 

@@ -37,6 +37,7 @@ pub const Token = struct {
         where,
         insert,
         into,
+        delete,
         values,
         create,
         table,

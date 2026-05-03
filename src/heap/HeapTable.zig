@@ -118,7 +118,7 @@ pub fn readHeader(self: HeapTable) !Header {
 }
 
 /// Add a new tuple to the HeapTable.
-pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
+pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !MemTuple.Pos {
     const header = try self.readHeader();
 
     // Go through pages to find a page that can fit this new tuple.
@@ -138,7 +138,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
     } else try self.addPage();
 
     // Write the tuple to the page
-    {
+    const pos = block: {
         const raw_page = try self.cache.getWriteable(.{
             .file = self.table_id.fullFileId(),
             .page = page_id,
@@ -146,8 +146,12 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
         defer self.cache.unpin(raw_page);
         var page = HeapPage.parse(raw_page.page, page_id);
 
-        page.add(tuple);
-    }
+        const index = page.add(tuple);
+        break :block MemTuple.Pos{
+            .page_id = page_id,
+            .index = index,
+        };
+    };
 
     // Update the number of tuples on the header page
     {
@@ -159,46 +163,38 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !void {
         const h = Header.fromPage(page.page);
         h.tuples += 1;
     }
+
+    return pos;
 }
 
 /// Update the tuple directly on the page.
 /// Care must be taken to ensure that the new data isn't bigger in size
 /// than old data.
-pub fn updateInPlace(self: HeapTable, i: u64, tuple: MemTuple) !void {
-    const header = try self.readHeader();
+pub fn updateInPlace(self: HeapTable, tuple: MemTuple) !void {
+    const pos = tuple.extended().pos;
 
-    // How many tuples we already skipped
-    var counter: u64 = 0;
-    // Go through pages to find the tuple
-    const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
-        // Read the page
-        const raw_page = try self.cache.get(.{
-            .file = self.table_id.fullFileId(),
-            .page = @intCast(page_id),
-        });
-        defer self.cache.unpin(raw_page);
+    const raw_page = try self.cache.getWriteable(.{
+        .file = self.table_id.fullFileId(),
+        .page = pos.page_id,
+    });
+    defer self.cache.unpin(raw_page);
+    var page = HeapPage.parse(raw_page.page, pos.page_id);
 
-        const page = HeapPage.parse(raw_page.page, @intCast(page_id));
-        if (i < counter + page.offsets.len)
-            // If the tuple index is on this page, we're done
-            break :page_id @intCast(page_id)
-        else
-            // Otherwise skip the tuples on this page and go to next one
-            counter += page.offsets.len;
-    } else @panic("Updating non-existent tuple");
+    // Check that we can actually update the tuple
+    if (!page.canUpdateInPlace(pos.index, tuple))
+        @panic("Cannot actually update in place!");
+    page.updateInPlace(pos.index, tuple);
+}
 
-    // Actually update the tuple on the page
-    {
-        const raw_page = try self.cache.getWriteable(.{
-            .file = self.table_id.fullFileId(),
-            .page = page_id,
-        });
-        defer self.cache.unpin(raw_page);
-        var page = HeapPage.parse(raw_page.page, page_id);
+/// Delete the tuple directly on the page.
+/// This sets xmax of the tuple to tid.
+pub fn deleteTupleAt(self: HeapTable, pos: MemTuple.Pos, tid: ids.TransactionId) !void {
+    const raw_page = try self.cache.getWriteable(.{
+        .file = self.table_id.fullFileId(),
+        .page = pos.page_id,
+    });
+    defer self.cache.unpin(raw_page);
+    var page = HeapPage.parse(raw_page.page, pos.page_id);
 
-        // Check that we can actually update the tuple
-        if (!page.canUpdateInPlace(@intCast(i - counter), tuple))
-            @panic("Cannot actually update in place!");
-        page.updateInPlace(@intCast(i - counter), tuple);
-    }
+    page.deleteTupleAt(pos.index, tid);
 }

@@ -261,7 +261,8 @@ pub fn fits(self: *const HeapPage, tuple: MemTuple) bool {
 /// Put a new MemTuple on this HeapPage. The offset is placed at the end of
 /// the offset array.
 /// pos extended field in MemTuple is ignored.
-pub fn add(self: *HeapPage, tuple: MemTuple) void {
+/// Returns the index of the added tuple.
+pub fn add(self: *HeapPage, tuple: MemTuple) u16 {
     std.debug.assert(self.fits(tuple));
     std.debug.assert(tuple.ptr.h.descr.has_extended);
 
@@ -278,6 +279,7 @@ pub fn add(self: *HeapPage, tuple: MemTuple) void {
     self.offsets.len += 1;
     self.offsets[self.offsets.len - 1] = @intCast(new_offset);
     self.header().count += 1;
+    return @intCast(self.offsets.len - 1);
 }
 
 /// Update the i-th tuple on HeapPage with a new MemTuple.
@@ -292,4 +294,11 @@ pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple) void {
     const dest = raw[0..tuple.heapSize()];
     @memset(dest, 0);
     HeapTuple.write(new, dest);
+}
+
+/// Deletes the i-th tuple on HeapPage.
+/// This updates tuple's xmax to tid.
+pub fn deleteTupleAt(self: *HeapPage, i: u16, tid: ids.TransactionId) void {
+    const tuple = self.getHeapTuple(i);
+    tuple.ptr.h.xmax = tid;
 }

@@ -5,6 +5,7 @@ const DBType = @import("../data/types.zig").DBType;
 
 pub const Statement = union(enum) {
     select: Select,
+    delete: Delete,
     insert_values: InsertValues,
     create_table: CreateTable,
     drop_table: DropTable,
@@ -14,6 +15,11 @@ pub const Statement = union(enum) {
     pub const Select = struct {
         columns: std.ArrayList(Expression),
         sources: std.ArrayList(DataSource),
+        where: ?*Expression,
+    };
+
+    pub const Delete = struct {
+        name: Name,
         where: ?*Expression,
     };
 
