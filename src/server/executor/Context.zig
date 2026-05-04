@@ -17,8 +17,7 @@ db_id: ids.DatabaseId, // Database id
 tid: ids.TransactionId, // Current transaction id
 snapshot: *const transaction.Snapshot,
 
-output: *std.Io.Writer, // Text output for errors
-data_output: std.ArrayList(common.MemTuple) = .empty, // Output for tuples
+sender: common.network.Message.Sender, // Message sender
 
 pub const Error = error{
     MalformedData,

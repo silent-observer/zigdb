@@ -73,8 +73,8 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
-    const exe = b.addExecutable(.{
-        .name = "zigdb",
+    const server_exe = b.addExecutable(.{
+        .name = "server",
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -89,7 +89,6 @@ pub fn build(b: *std.Build) void {
             // List of modules available for import in source files part of the
             // root module.
             .imports = &.{
-                .{ .name = "common", .module = common },
                 .{ .name = "zigdb", .module = mod },
             },
         }),
@@ -100,10 +99,10 @@ pub fn build(b: *std.Build) void {
     // install prefix when running `zig build` (i.e. when executing the default
     // step). By default the install prefix is `zig-out/` but can be overridden
     // by passing `--prefix` or `-p`.
-    b.installArtifact(exe);
+    b.installArtifact(server_exe);
 
-    const exe_check = b.addExecutable(.{
-        .name = "zigdb",
+    const server_exe_check = b.addExecutable(.{
+        .name = "server",
         .root_module = b.createModule(.{
             // b.createModule defines a new module just like b.addModule but,
             // unlike b.addModule, it does not expose the module to consumers of
@@ -118,22 +117,73 @@ pub fn build(b: *std.Build) void {
             // List of modules available for import in source files part of the
             // root module.
             .imports = &.{
-                .{ .name = "common", .module = common },
                 .{ .name = "zigdb", .module = mod },
             },
         }),
         .use_llvm = true,
     });
 
+    const client_exe = b.addExecutable(.{
+        .name = "client",
+        .root_module = b.createModule(.{
+            // b.createModule defines a new module just like b.addModule but,
+            // unlike b.addModule, it does not expose the module to consumers of
+            // this package, which is why in this case we don't have to give it a name.
+            .root_source_file = b.path("src/client/main.zig"),
+            // Target and optimization levels must be explicitly wired in when
+            // defining an executable or library (in the root module), and you
+            // can also hardcode a specific target for an executable or library
+            // definition if desireable (e.g. firmware for embedded devices).
+            .target = target,
+            .optimize = optimize,
+            // List of modules available for import in source files part of the
+            // root module.
+            .imports = &.{
+                .{ .name = "common", .module = common },
+            },
+        }),
+        .use_llvm = true,
+    });
+
+    // This declares intent for the executable to be installed into the
+    // install prefix when running `zig build` (i.e. when executing the default
+    // step). By default the install prefix is `zig-out/` but can be overridden
+    // by passing `--prefix` or `-p`.
+    b.installArtifact(client_exe);
+
+    const client_exe_check = b.addExecutable(.{
+        .name = "client",
+        .root_module = b.createModule(.{
+            // b.createModule defines a new module just like b.addModule but,
+            // unlike b.addModule, it does not expose the module to consumers of
+            // this package, which is why in this case we don't have to give it a name.
+            .root_source_file = b.path("src/client/main.zig"),
+            // Target and optimization levels must be explicitly wired in when
+            // defining an executable or library (in the root module), and you
+            // can also hardcode a specific target for an executable or library
+            // definition if desireable (e.g. firmware for embedded devices).
+            .target = target,
+            .optimize = optimize,
+            // List of modules available for import in source files part of the
+            // root module.
+            .imports = &.{
+                .{ .name = "common", .module = common },
+            },
+        }),
+        .use_llvm = true,
+    });
+
     const check_step = b.step("check", "Check if zigdb compiles");
-    check_step.dependOn(&exe_check.step);
+    check_step.dependOn(&server_exe_check.step);
+    check_step.dependOn(&client_exe_check.step);
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.
     // For a top level step to actually do something, it must depend on other
     // steps (e.g. a Run step, as we will see in a moment).
-    const run_step = b.step("run", "Run the app");
+    const run_server_step = b.step("run-server", "Run the server");
+    const run_client_step = b.step("run-client", "Run the client");
 
     // This creates a RunArtifact step in the build graph. A RunArtifact step
     // invokes an executable compiled by Zig. Steps will only be executed by the
@@ -141,17 +191,21 @@ pub fn build(b: *std.Build) void {
     // or if another step depends on it, so it's up to you to define when and
     // how this Run step will be executed. In our case we want to run it when
     // the user runs `zig build run`, so we create a dependency link.
-    const run_cmd = b.addRunArtifact(exe);
-    run_step.dependOn(&run_cmd.step);
+    const run_server_cmd = b.addRunArtifact(server_exe);
+    const run_client_cmd = b.addRunArtifact(client_exe);
+    run_server_step.dependOn(&run_server_cmd.step);
+    run_client_step.dependOn(&run_client_cmd.step);
 
     // By making the run step depend on the default step, it will be run from the
     // installation directory rather than directly from within the cache directory.
-    run_cmd.step.dependOn(b.getInstallStep());
+    run_server_cmd.step.dependOn(b.getInstallStep());
+    run_client_cmd.step.dependOn(b.getInstallStep());
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
-        run_cmd.addArgs(args);
+        run_server_cmd.addArgs(args);
+        run_client_cmd.addArgs(args);
     }
 
     // Creates an executable that will run `test` blocks from the provided module.
@@ -168,7 +222,7 @@ pub fn build(b: *std.Build) void {
     // root module. Note that test executables only test one module at a time,
     // hence why we have to create two separate ones.
     const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
+        .root_module = server_exe.root_module,
     });
 
     // A run step that will run the second test executable.

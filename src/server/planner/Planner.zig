@@ -317,7 +317,8 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     const input_node = try p.planDataSource(source);
 
     // The SELECT might contain expression that might need projection
-    var need_project = stmt.columns.len != input_node.descr.attrs.len;
+    var need_project = stmt.columns.len != input_node.descr.attrs.len or
+        input_node.descr.has_extended;
     // List of scalar nodes for expressions
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.len) catch oom();

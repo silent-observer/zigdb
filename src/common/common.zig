@@ -12,3 +12,4 @@ pub const TypedValue = value.TypedValue;
 pub const oom = @import("utils.zig").oom;
 
 pub const ids = @import("ids.zig");
+pub const network = @import("network.zig");

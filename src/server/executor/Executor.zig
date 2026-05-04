@@ -45,10 +45,13 @@ fn executeSelect(
     // Don't forget to free it at the end
     defer deinitDataNode(stmt.root, cxt);
 
+    // Send the descriptor to the client
+    try cxt.sender.send(.{ .tuple_descriptor = stmt.root.descr });
+
     // Fetch tuples one by one
     while (try execDataNode(stmt.root, cxt)) |tuple| {
-        // And add them to the output
-        cxt.data_output.append(cxt.alloc, tuple) catch oom();
+        // And send them to the client
+        try cxt.sender.send(.{ .tuple = tuple });
     }
 }
 
@@ -61,7 +64,11 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
         .filter => filter.init(plan, cxt),
     };
     r catch |err| {
-        cxt.output.print("ERROR: {} during Plan init\n", .{err}) catch {};
+        cxt.sender.log(
+            cxt.alloc,
+            "ERROR: {} during Plan init",
+            .{err},
+        ) catch {};
         return Error.ExecutionError;
     };
 }
@@ -85,7 +92,11 @@ pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple 
         .filter => filter.next(plan, cxt),
     };
     return r catch |err| {
-        cxt.output.print("ERROR: {} during execution\n", .{err}) catch {};
+        cxt.sender.log(
+            cxt.alloc,
+            "ERROR: {} during execution",
+            .{err},
+        ) catch {};
         return Error.ExecutionError;
     };
 }

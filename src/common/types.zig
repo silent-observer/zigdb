@@ -115,11 +115,13 @@ pub const TupleDescriptor = struct {
     };
 
     /// Clone the TupleDescriptor.
-    /// Does *not* clone the names.
     pub fn clone(self: *const TupleDescriptor, gpa: std.mem.Allocator) TupleDescriptor {
         const new: TupleDescriptor = .{
             .attrs = self.attrs.clone(gpa) catch oom(),
         };
+        for (new.attrs.items(.name)) |*name| {
+            name.* = gpa.dupe(u8, name.*) catch oom();
+        }
         return new;
     }
 

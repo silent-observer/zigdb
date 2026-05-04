@@ -79,7 +79,7 @@ pub const MemTuple = struct {
     /// Representation of the memory tuple data.
     /// Note that the actual size of memory tuple is in general
     /// bigger than @sizeOf(Data).
-    const Data = extern struct {
+    pub const Data = extern struct {
         h: Header,
         tail: extern union {
             // This has two versions: without extended fields or with them
@@ -191,6 +191,15 @@ pub const MemTuple = struct {
             @as(usize, if (d.ext != null) @sizeOf(MemTuple.ExtendedFields) else 0) +
             d.offsets.len * @sizeOf(u16) +
             d.data.len;
+    }
+
+    pub fn allocUnitialized(alloc: std.mem.Allocator, s: usize) MemTuple {
+        const bytes = alloc.alignedAlloc(
+            u8,
+            std.mem.Alignment.fromByteUnits(@alignOf(MemTuple.Data)),
+            s,
+        ) catch oom();
+        return .{ .ptr = @ptrCast(bytes) };
     }
 
     /// Get i-th attribute with a comptime-known type T.

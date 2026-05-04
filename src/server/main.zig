@@ -1,5 +1,4 @@
 const std = @import("std");
-const Io = std.Io;
 
 const zigdb = @import("zigdb");
 
@@ -39,37 +38,28 @@ pub fn main(init: std.process.Init) !void {
 
     //try catalog_cache.rebuild();
 
-    // Create a stdin reader
-    var stdin_buffer: [1024]u8 = undefined;
-    var stdin_reader = std.Io.File.stdin().readerStreaming(init.io, &stdin_buffer);
+    std.debug.print("Accepting connections!\n", .{});
 
-    // Storage for the command line
-    var line = std.Io.Writer.Allocating.init(init.gpa);
-    defer line.deinit();
+    const listen_addr = try std.Io.net.IpAddress.parse(
+        "0.0.0.0",
+        zigdb.common.network.default_port,
+    );
+    var tcp_server = try listen_addr.listen(init.io, .{});
+    defer tcp_server.deinit(init.io);
 
-    while (true) {
-        // Print prompt
-        std.debug.print("> ", .{});
-        // Read one line from stdin to line writer
-        _ = try stdin_reader.interface.streamDelimiterEnding(&line.writer, '\n');
-        // Check if it's the exit command
-        if (std.ascii.eqlIgnoreCase(line.written(), "exit"))
-            break;
+    const client_stream = try tcp_server.accept(init.io);
+    defer client_stream.close(init.io);
 
-        // Execute the query
-        zigdb.execute_stmt(
-            init.io,
-            init.gpa,
-            &storage_cache,
-            &catalog_cache,
-            &transaction_log,
-            line.written(),
-        ) catch {};
-        try storage_cache.flush(false);
+    std.debug.print("Got connection from {f}!\n", .{client_stream.socket.address});
 
-        // Clear the command writer for the next command
-        line.clearRetainingCapacity();
-        // Skip newline
-        stdin_reader.interface.toss(1);
-    }
+    const session = zigdb.Session{
+        .gpa = init.gpa,
+        .catalog_cache = &catalog_cache,
+        .storage_cache = &storage_cache,
+        .transaction_log = &transaction_log,
+    };
+
+    var server = zigdb.Server.init(init.io, init.gpa, client_stream, session);
+    defer server.deinit();
+    try server.loop();
 }
