@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const Io = std.Io;
-const ids = @import("../ids.zig");
+const ids = @import("common").ids;
 
 pub const Page = struct {
     /// Each page is 8 KB

@@ -1,7 +1,7 @@
 //! Abstract Syntax Tree of SQL
 
 const std = @import("std");
-const DBType = @import("../data/types.zig").DBType;
+const DBType = @import("common").DBType;
 
 pub const Statement = union(enum) {
     select: Select,

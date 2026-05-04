@@ -4,8 +4,8 @@ const std = @import("std");
 
 const catalog = @import("../catalog.zig");
 const storage = @import("../storage.zig");
-const ids = @import("../ids.zig");
-const data = @import("../data.zig");
+const common = @import("common");
+const ids = common.ids;
 const transaction = @import("../transaction.zig");
 
 alloc: std.mem.Allocator, // Allocator for tuples
@@ -18,7 +18,7 @@ tid: ids.TransactionId, // Current transaction id
 snapshot: *const transaction.Snapshot,
 
 output: *std.Io.Writer, // Text output for errors
-data_output: std.ArrayList(data.MemTuple) = .empty, // Output for tuples
+data_output: std.ArrayList(common.MemTuple) = .empty, // Output for tuples
 
 pub const Error = error{
     MalformedData,

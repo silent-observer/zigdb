@@ -45,10 +45,11 @@
 
 const std = @import("std");
 const Page = @import("../storage/RawDataFile.zig").Page;
-const MemTuple = @import("../data/tuple.zig").MemTuple;
-const ids = @import("../ids.zig");
-const t = @import("../data/types.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const MemTuple = common.MemTuple;
+const TupleDescriptor = common.TupleDescriptor;
+const oom = common.oom;
+const ids = common.ids;
 
 const HeapPage = @This();
 
@@ -144,7 +145,7 @@ const HeapTuple = struct {
     /// The TupleDescriptor must also be supplied.
     fn read(
         self: HeapTuple,
-        descr: *const t.TupleDescriptor,
+        descr: *const TupleDescriptor,
         alloc: std.mem.Allocator,
         pos: MemTuple.Pos,
     ) MemTuple {
@@ -224,7 +225,7 @@ fn getHeapTuple(self: *const HeapPage, i: u16) HeapTuple {
 pub fn read(
     self: *const HeapPage,
     i: u16,
-    descr: *const t.TupleDescriptor,
+    descr: *const TupleDescriptor,
     alloc: std.mem.Allocator,
 ) MemTuple {
     const tuple = self.getHeapTuple(i);

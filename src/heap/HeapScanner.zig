@@ -8,15 +8,15 @@ const storage = @import("../storage.zig");
 const transaction = @import("../transaction.zig");
 const HeapTable = @import("HeapTable.zig");
 const HeapPage = @import("HeapPage.zig");
-const MemTuple = @import("../data/tuple.zig").MemTuple;
-const ExtendedMemTuple = HeapPage.ExtendedMemTuple;
-const t = @import("../data/types.zig");
-const ids = @import("../ids.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const MemTuple = common.MemTuple;
+const TupleDescriptor = common.TupleDescriptor;
+const oom = common.oom;
+const ids = common.ids;
 
 const HeapScanner = @This();
 
-descr: *const t.TupleDescriptor,
+descr: *const TupleDescriptor,
 table_id: ids.FullTableId,
 page_id: ids.PageId, // Current page id
 tuple_index: u16, // Current tuple index on the page
@@ -31,7 +31,7 @@ snapshot: *const transaction.Snapshot,
 pub fn init(
     cache: *storage.Cache,
     table_id: ids.FullTableId,
-    descr: *const t.TupleDescriptor,
+    descr: *const TupleDescriptor,
     snapshot: *const transaction.Snapshot,
 ) !HeapScanner {
     const header = try HeapTable.init(cache, table_id).readHeader();

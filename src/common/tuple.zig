@@ -40,10 +40,10 @@
 //! ```
 
 const std = @import("std");
-const ids = @import("../ids.zig");
+const ids = @import("ids.zig");
 const t = @import("types.zig");
 const Value = @import("value.zig").Value;
-const oom = @import("../utils.zig").oom;
+const oom = @import("utils.zig").oom;
 
 /// Pointer to a memory tuple
 /// Since memory tuple size is dynamic, all operations with memory tuples

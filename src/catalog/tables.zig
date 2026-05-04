@@ -39,8 +39,8 @@
 const std = @import("std");
 
 const HeapTable = @import("../heap/HeapTable.zig");
-const t = @import("../data/types.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 
 /// Fixed table ids of catalog tables.
 pub const TableId = enum(u32) {
@@ -76,7 +76,7 @@ pub const SequenceId = enum(u32) {
 /// Used for comptime code generation.
 const AttributeEntry = struct {
     id: SystemAttribute,
-    db_type: t.DBType,
+    db_type: common.DBType,
     t: type,
 };
 
@@ -182,10 +182,10 @@ fn fillAttrData() std.EnumArray(SystemAttribute, AttributeData) {
 
 /// Function to fill all the TupleDescriptors of system tables.
 /// Can only be called at runtime because TupleDescriptor requires allocation.
-fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, t.TupleDescriptor) {
-    var result = std.EnumArray(TableId, t.TupleDescriptor).initUndefined();
+fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, common.TupleDescriptor) {
+    var result = std.EnumArray(TableId, common.TupleDescriptor).initUndefined();
     inline for (Tables) |r| {
-        var descr = t.TupleDescriptor.emptyExtended;
+        var descr = common.TupleDescriptor.emptyExtended;
         descr.attrs.ensureUnusedCapacity(gpa, r.attrs.len) catch oom();
         inline for (r.attrs) |a| {
             descr.attrs.appendAssumeCapacity(.{
@@ -201,7 +201,7 @@ fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, t.TupleDescrip
 /// Array of all tuple descriptors of system tables.
 /// It's the same for every database, so it's okay to have in a global variable.
 var descriptors =
-    std.EnumArray(TableId, t.TupleDescriptor).initUndefined();
+    std.EnumArray(TableId, common.TupleDescriptor).initUndefined();
 
 /// Initialize the descriptor array.
 /// Must be done once at the start of the process.
@@ -226,7 +226,7 @@ pub fn Attr(comptime id: SystemAttribute) type {
 }
 
 /// Get the TupleDescriptor of the system table.
-pub fn descriptor(id: TableId) *const t.TupleDescriptor {
+pub fn descriptor(id: TableId) *const common.TupleDescriptor {
     return descriptors.getPtr(id);
 }
 

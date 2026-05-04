@@ -1,8 +1,9 @@
 const std = @import("std");
-const ids = @import("../ids.zig");
+const common = @import("common");
 const storage = @import("../storage.zig");
 const transaction = @import("transaction.zig");
-const oom = @import("../utils.zig").oom;
+const ids = common.ids;
+const oom = common.oom;
 
 const TransactionLog = @This();
 

@@ -4,10 +4,10 @@ const std = @import("std");
 
 const Plan = @import("Plan.zig");
 const ast = @import("../sql/ast.zig");
-const data = @import("../data.zig");
-const ids = @import("../ids.zig");
+const common = @import("common");
+const ids = common.ids;
 const catalog = @import("../catalog.zig");
-const oom = @import("../utils.zig").oom;
+const oom = common.oom;
 
 const Planner = @This();
 
@@ -59,7 +59,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
 /// Plan CREATE TABLE statement
 fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Statement {
     // Build the TupleDescriptor for the new table
-    const descr = p.make(data.TupleDescriptor.empty);
+    const descr = p.make(common.TupleDescriptor.empty);
     descr.attrs.ensureUnusedCapacity(
         p.alloc,
         stmt.columns.len,
@@ -138,7 +138,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
 
     // This is the descriptor of what we get as input data
-    const input_descr = p.alloc.create(data.TupleDescriptor) catch oom();
+    const input_descr = p.alloc.create(common.TupleDescriptor) catch oom();
     if (stmt.columns.len > 0) {
         // If the user specified the list of columns, we might need to reorder them for storage.
         input_descr.* = .empty;
@@ -207,8 +207,8 @@ fn isConstExpression(expr: ast.Expression) bool {
 fn evalConstExpression(
     p: *Planner,
     expr: ast.Expression,
-    cxt: *const data.TupleDescriptor,
-) Error!data.TypedValue {
+    cxt: *const common.TupleDescriptor,
+) Error!common.TypedValue {
     const t = try p.inferExprType(expr, cxt);
 
     switch (expr) {
@@ -216,7 +216,7 @@ fn evalConstExpression(
             p.addError("Cannot use variable \"{s}\" as a constant", .{v});
             return Error.NotAConstant;
         },
-        .integer => |i| return data.TypedValue{
+        .integer => |i| return common.TypedValue{
             .v = .{ .int = i },
             .t = t,
         },
@@ -224,13 +224,13 @@ fn evalConstExpression(
             const x = try p.evalConstExpression(u.expr.*, cxt);
             switch (u.op) {
                 .neg => {
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .int = -x.v.int },
                         .t = t,
                     };
                 },
                 .not => {
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .bool = !x.v.bool },
                         .t = t,
                     };
@@ -249,7 +249,7 @@ fn evalConstExpression(
                         .div => @divTrunc(lhs.v.int, rhs.v.int),
                         else => unreachable,
                     };
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .int = v },
                         .t = t,
                     };
@@ -260,7 +260,7 @@ fn evalConstExpression(
                         .@"or" => lhs.v.bool or rhs.v.bool,
                         else => unreachable,
                     };
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .bool = v },
                         .t = t,
                     };
@@ -271,7 +271,7 @@ fn evalConstExpression(
                         .int => lhs.v.int == rhs.v.int,
                         .text => std.mem.eql(u8, lhs.v.text, rhs.v.text),
                     };
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .bool = v },
                         .t = t,
                     };
@@ -284,7 +284,7 @@ fn evalConstExpression(
                         .ge => lhs.v.int >= rhs.v.int,
                         else => unreachable,
                     };
-                    return data.TypedValue{
+                    return common.TypedValue{
                         .v = .{ .bool = v },
                         .t = t,
                     };
@@ -359,7 +359,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     // Add a projection node if needed
     if (need_project) {
         // Build the description
-        const new_descr = p.make(data.TupleDescriptor.empty);
+        const new_descr = p.make(common.TupleDescriptor.empty);
         new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
         for (stmt.columns, scalarNodes.items) |c, n| {
             new_descr.attrs.appendAssumeCapacity(.{
@@ -500,11 +500,11 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
 fn planValues(
     p: *Planner,
     values: []const ast.ValueList,
-    cxt: *const data.TupleDescriptor,
+    cxt: *const common.TupleDescriptor,
 ) Error!*Plan.DataNode {
     // The list of tuples in the VALUES
     var values_data =
-        std.ArrayList(data.MemTuple).initCapacity(p.alloc, values.len) catch oom();
+        std.ArrayList(common.MemTuple).initCapacity(p.alloc, values.len) catch oom();
     // Go through all the rows in the query
     for (values) |row| {
         // Check the row lengths
@@ -517,7 +517,7 @@ fn planValues(
         }
 
         // Build the tuple
-        var b = data.MemTuple.Builder.init(p.alloc, cxt);
+        var b = common.MemTuple.Builder.init(p.alloc, cxt);
         for (row.columns, cxt.attrs.items(.t)) |expr, t| {
             const val = try p.evalConstExpression(expr, cxt);
             // Check the type of the value
@@ -539,7 +539,7 @@ fn planValues(
     });
 }
 
-fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const data.TupleDescriptor) Error!data.DBType {
+fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDescriptor) Error!common.DBType {
     switch (expr) {
         .variable => |v| { // Variable expression
             // Find the column
@@ -600,7 +600,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const data.TupleDescri
 fn planExpression(
     p: *Planner,
     expr: ast.Expression,
-    cxt: *const data.TupleDescriptor,
+    cxt: *const common.TupleDescriptor,
 ) Error!Plan.ScalarNode {
     // Fast return for constant expressions
     if (isConstExpression(expr)) {

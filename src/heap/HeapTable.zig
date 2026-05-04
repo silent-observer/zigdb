@@ -10,8 +10,9 @@ const RawDataFile = @import("../storage/RawDataFile.zig");
 const Page = RawDataFile.Page;
 const storage = @import("../storage.zig");
 const HeapPage = @import("HeapPage.zig");
-const MemTuple = @import("../data/tuple.zig").MemTuple;
-const ids = @import("../ids.zig");
+const common = @import("common");
+const MemTuple = common.MemTuple;
+const ids = common.ids;
 
 const HeapTable = @This();
 

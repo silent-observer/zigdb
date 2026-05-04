@@ -7,8 +7,8 @@ const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
 const heap = @import("../heap.zig");
-const data = @import("../data.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 
 /// The internal state of the FullScan
 const State = struct {
@@ -43,7 +43,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
 }
 
 /// Fetch one tuple from FullScan DataNode
-pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
+pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     std.debug.assert(plan.action == .full_scan);
     const state: *State = @ptrCast(@alignCast(plan.state.?));
     // Just fetch one tuple from the scanner

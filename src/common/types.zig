@@ -1,5 +1,5 @@
 const std = @import("std");
-const oom = @import("../utils.zig").oom;
+const oom = @import("utils.zig").oom;
 
 /// A possible type of a value in the database
 pub const DBType = enum(u32) {

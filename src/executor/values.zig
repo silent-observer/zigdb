@@ -5,8 +5,8 @@ const std = @import("std");
 
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
-const data = @import("../data.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 
 /// Internal state for Values DataNode
 const State = struct {
@@ -31,7 +31,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     cxt.alloc.destroy(state);
 }
 
-pub fn next(plan: *Plan.DataNode, cxt: *Context) ?data.MemTuple {
+pub fn next(plan: *Plan.DataNode, cxt: *Context) ?common.MemTuple {
     std.debug.assert(plan.action == .values);
     _ = cxt;
     const state: *State = @ptrCast(@alignCast(plan.state.?));

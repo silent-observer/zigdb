@@ -1,7 +1,7 @@
 const std = @import("std");
 const transaction = @import("transaction.zig");
 const TransactionLog = @import("TransactionLog.zig");
-const ids = @import("../ids.zig");
+const ids = @import("common").ids;
 
 const Snapshot = @This();
 

@@ -10,9 +10,9 @@ const full_scan = @import("full_scan.zig");
 const values = @import("values.zig");
 const project = @import("project.zig");
 const filter = @import("filter.zig");
-const data = @import("../data.zig");
+const common = @import("common");
 const heap = @import("../heap.zig");
-const oom = @import("../utils.zig").oom;
+const oom = common.oom;
 
 pub const Executor = @This();
 pub const Error = error{
@@ -77,7 +77,7 @@ pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
 }
 
 /// Fetch one tuple fron data node. Can be used like an iterator.
-pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?data.MemTuple {
+pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple {
     const r = switch (plan.action) {
         .full_scan => full_scan.next(plan, cxt),
         .values => values.next(plan, cxt),

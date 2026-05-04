@@ -14,8 +14,9 @@
 const std = @import("std");
 
 const RawDataFile = @import("RawDataFile.zig");
-const ids = @import("../ids.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const ids = common.ids;
+const oom = common.oom;
 
 const Cache = @This();
 

@@ -4,14 +4,16 @@
 
 const std = @import("std");
 
-const MemTuple = @import("../data/tuple.zig").MemTuple;
-const t = @import("../data/types.zig");
+const common = @import("common");
+const MemTuple = common.MemTuple;
+const TupleDescriptor = common.TupleDescriptor;
+const oom = common.oom;
+const ids = common.ids;
+
 const tables = @import("tables.zig");
 const heap = @import("../heap.zig");
 const storage = @import("../storage.zig");
 const transaction = @import("../transaction.zig");
-const ids = @import("../ids.zig");
-const oom = @import("../utils.zig").oom;
 
 const CatalogCache = @This();
 
@@ -24,7 +26,7 @@ db_id: ids.DatabaseId,
 /// The actual cache data
 catalog: CatalogTables,
 /// Cache of TupleDescriptors of all tables in the database
-descr: std.array_hash_map.Auto(ids.TableId, t.TupleDescriptor),
+descr: std.array_hash_map.Auto(ids.TableId, TupleDescriptor),
 
 /// All catalog tables
 pub const CatalogTables = struct {
@@ -119,7 +121,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
             self.catalog.zdb_attrs.scan(&.{.attr_rel_id}, &.{rel.rel_id});
 
         // Build the descriptor
-        var descr: t.TupleDescriptor = .emptyExtended;
+        var descr: TupleDescriptor = .emptyExtended;
         while (attr_scanner.next()) |attr| {
             descr.attrs.append(self.gpa, .{
                 .name = attr.attr_name,
@@ -145,7 +147,7 @@ pub fn Table(comptime id: tables.TableId) type {
         // Database this table belongs to
         db_id: u32,
         // Descriptor of this catalog table
-        descr: *const t.TupleDescriptor,
+        descr: *const TupleDescriptor,
         // Actual tuples in the catalog table
         data: std.ArrayList(MemTuple),
 

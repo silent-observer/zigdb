@@ -7,8 +7,8 @@ const std = @import("std");
 
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
-const data = @import("../data.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 const Executor = @import("Executor.zig");
 const scalar = @import("scalar.zig");
 
@@ -27,7 +27,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
 }
 
 /// Fetch one tuple from Project DataNode
-pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
+pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     std.debug.assert(plan.action == .project);
     // Get one tuple from child
     const input = try Executor.execDataNode(plan.action.project.input, cxt);
@@ -35,7 +35,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
     if (input == null) return null;
 
     // Build our new tuple
-    var b = data.MemTuple.Builder.init(cxt.alloc, plan.descr);
+    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
     if (plan.action.project.exprs.len == 0) {
         // Special case: simply copy data from input
         for (0..input.?.len()) |i| {

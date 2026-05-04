@@ -1,7 +1,7 @@
 //! Lexer for SQL
 
 const std = @import("std");
-const oom = @import("../utils.zig").oom;
+const oom = @import("common").oom;
 
 const Lexer = @This();
 

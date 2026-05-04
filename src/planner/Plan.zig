@@ -2,8 +2,8 @@
 
 const std = @import("std");
 
-const data = @import("../data.zig");
-const ids = @import("../ids.zig");
+const common = @import("common");
+const ids = common.ids;
 const ast = @import("../sql/ast.zig");
 
 /// This is a column index inside a given tuple descriptor.
@@ -53,7 +53,7 @@ pub const Statement = union(enum) {
         /// Name of the table to create
         name: []const u8,
         /// Descriptor for the new table
-        descr: *const data.TupleDescriptor,
+        descr: *const common.TupleDescriptor,
     };
 
     pub const DropTable = struct {
@@ -71,7 +71,7 @@ pub const Statement = union(enum) {
 /// They usually form the bulk of the plan.
 pub const DataNode = struct {
     action: Action, // Type of the data node
-    descr: *const data.TupleDescriptor, // Descriptor for rows it returns
+    descr: *const common.TupleDescriptor, // Descriptor for rows it returns
     state: ?*anyopaque = null, // Internal state of the node
 
     pub const Action = union(enum) {
@@ -89,7 +89,7 @@ pub const DataNode = struct {
         /// Returns rows defined in the query itself
         pub const Values = struct {
             /// Rows to return
-            data: []data.MemTuple,
+            data: []common.MemTuple,
         };
 
         /// Projects input data by executing scalar expressions on it.
@@ -123,12 +123,12 @@ pub const DataNode = struct {
 /// A node that can return a scalar value.
 /// Must be executed in the context of some tuple.
 pub const ScalarNode = struct {
-    dbtype: data.DBType, // Type of value it returns
+    dbtype: common.DBType, // Type of value it returns
     action: Action, // Type of node
 
     pub const Action = union(enum) {
         column: ColumnId, // Value from a column
-        value: data.Value, // Constant value
+        value: common.Value, // Constant value
         unary: Unary, // Unary operation
         binary: Binary, // Binary operation
     };

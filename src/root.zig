@@ -1,9 +1,9 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-pub const data = @import("data.zig");
+pub const common = @import("common");
 pub const storage = @import("storage.zig");
 const heap = @import("heap.zig");
-pub const ids = @import("ids.zig");
+pub const ids = common.ids;
 pub const catalog = @import("catalog.zig");
 pub const transaction = @import("transaction.zig");
 const planner = @import("planner.zig");

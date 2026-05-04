@@ -1,6 +1,6 @@
 const std = @import("std");
 const t = @import("types.zig");
-const oom = @import("../utils.zig").oom;
+const oom = @import("utils.zig").oom;
 
 /// Value of runtime-known type.
 /// The type is not actually specified, only the value is.

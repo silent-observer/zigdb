@@ -4,11 +4,11 @@ const std = @import("std");
 
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
-const data = @import("../data.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 
 /// Evaluate a scalar node in the context of some tuple
-pub fn eval(scalar: *const Plan.ScalarNode, tuple: data.MemTuple) data.Value {
+pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value {
     switch (scalar.action) {
         .column => |i| return tuple.getValue(i), // Get column from tuple
         .value => |v| return v, // Constant value

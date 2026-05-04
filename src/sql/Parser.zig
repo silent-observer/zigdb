@@ -5,8 +5,9 @@
 const std = @import("std");
 const Lexer = @import("Lexer.zig");
 const ast = @import("ast.zig");
-const DBType = @import("../data/types.zig").DBType;
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const DBType = common.DBType;
+const oom = common.oom;
 
 const Parser = @This();
 

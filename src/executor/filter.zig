@@ -8,8 +8,8 @@ const std = @import("std");
 
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
-const data = @import("../data.zig");
-const oom = @import("../utils.zig").oom;
+const common = @import("common");
+const oom = common.oom;
 const Executor = @import("Executor.zig");
 const scalar = @import("scalar.zig");
 
@@ -28,7 +28,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
 }
 
 /// Fetch one tuple from Filter DataNode
-pub fn next(plan: *Plan.DataNode, cxt: *Context) !?data.MemTuple {
+pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     std.debug.assert(plan.action == .filter);
     // Get one tuple from child
     while (try Executor.execDataNode(plan.action.filter.input, cxt)) |input| {

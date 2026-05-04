@@ -3,12 +3,12 @@
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
-const ids = @import("../ids.zig");
+const ids = common.ids;
 const heap = @import("../heap.zig");
-const data = @import("../data.zig");
+const common = @import("common");
 const scalar = @import("scalar.zig");
 const Executor = @import("Executor.zig");
-const oom = @import("../utils.zig").oom;
+const oom = common.oom;
 
 /// Execute INSERT statement
 pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
@@ -59,7 +59,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
 
     // Temporary tuple for updates
     const temp_tuple = cxt.alloc.alloc(
-        data.Value,
+        common.Value,
         stmt.root.descr.attrs.len,
     ) catch oom();
     defer cxt.alloc.free(temp_tuple);
@@ -82,7 +82,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
             temp_tuple[col] = scalar.eval(&val, tuple);
         }
         // Build the new tuple
-        var b = data.MemTuple.Builder.init(cxt.alloc, stmt.root.descr);
+        var b = common.MemTuple.Builder.init(cxt.alloc, stmt.root.descr);
         for (temp_tuple) |v| {
             b.pushValue(v);
         }

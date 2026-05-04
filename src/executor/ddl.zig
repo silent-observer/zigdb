@@ -3,7 +3,7 @@
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
-const ids = @import("../ids.zig");
+const ids = @import("common").ids;
 const heap = @import("../heap.zig");
 
 /// Execute CREATE TABLE statement

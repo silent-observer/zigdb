@@ -1,4 +1,4 @@
-const ids = @import("../ids.zig");
+const ids = @import("common").ids;
 
 pub const Status = enum(u2) {
     in_progress = 0,
