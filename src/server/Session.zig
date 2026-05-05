@@ -41,6 +41,20 @@ pub fn execute_stmt(
 
     std.debug.print("{s}\n", .{query});
 
+    const catalog_snapshot = transaction.Snapshot.create(
+        s.shared.transaction_log,
+        s.current_tid,
+    );
+    s.catalog_cache.rebuild(&catalog_snapshot) catch |e| {
+        try sender.log(
+            arena.allocator(),
+            "Couldn't build catalog cache: {}\n",
+            .{e},
+        );
+        try sender.send(.err);
+        return;
+    };
+
     // Lex the query
     var parser = Parser.init(arena.allocator());
     if (parser.lex(query)) |err| {

@@ -16,14 +16,6 @@ fn handleConnection(
         1,
         shared_state.storage_cache,
     );
-    const catalog_snapshot = zigdb.transaction.Snapshot.create(
-        shared_state.transaction_log,
-        .virtual,
-    );
-    catalog_cache.rebuild(&catalog_snapshot) catch |e| {
-        std.debug.print("Couldn't build catalog cache: {}\n", .{e});
-        return;
-    };
 
     const session = zigdb.Session{
         .gpa = gpa,
