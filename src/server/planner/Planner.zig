@@ -52,6 +52,9 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
         .insert_values => return p.planInsertValues(stmt.insert_values),
         .update => return p.planUpdate(stmt.update),
         .truncate => return p.planTruncate(stmt.truncate),
+        .begin => return p.make(@as(Plan.Statement, .begin)),
+        .commit => return p.make(@as(Plan.Statement, .commit)),
+        .rollback => return p.make(@as(Plan.Statement, .rollback)),
         .err => unreachable,
     }
 }

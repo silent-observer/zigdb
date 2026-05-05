@@ -21,6 +21,7 @@ gpa: std.mem.Allocator,
 catalog_cache: *catalog.Cache,
 db_id: ids.DatabaseId,
 current_tid: transaction.Id,
+explicit_transaction: transaction.ExplicitStatus = .inactive,
 shared: Shared,
 
 pub const Shared = struct {
@@ -96,7 +97,11 @@ pub fn execute_stmt(
     // std.debug.print("{f}\n", .{formatted});
 
     {
-        errdefer s.shared.transaction_log.set(s.current_tid, .aborted) catch {};
+        errdefer if (s.explicit_transaction == .inactive) {
+            s.shared.transaction_log.set(s.current_tid, .aborted) catch {};
+        } else {
+            s.explicit_transaction = .broken;
+        };
 
         const snapshot = transaction.Snapshot.create(
             s.shared.transaction_log,
@@ -112,16 +117,23 @@ pub fn execute_stmt(
         };
         // Execute the query
         Executor.execute(plan, &cxt) catch |err| {
-            try sender.log(
-                arena.allocator(),
-                "ERROR: {}",
-                .{err},
-            );
+            if (err != Executor.Error.ExecutionError) {
+                try sender.log(
+                    arena.allocator(),
+                    "ERROR: {}",
+                    .{err},
+                );
+            }
             try sender.send(.err);
+            if (s.explicit_transaction == .active)
+                s.explicit_transaction = .broken;
             return;
         };
 
-        try s.shared.transaction_log.set(s.current_tid, .committed);
+        if (s.explicit_transaction == .inactive) {
+            try s.shared.transaction_log.set(s.current_tid, .committed);
+            s.current_tid = .virtual;
+        }
 
         try sender.send(.success);
     }

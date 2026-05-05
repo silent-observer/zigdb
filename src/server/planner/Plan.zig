@@ -18,6 +18,9 @@ pub const Statement = union(enum) {
     create_table: CreateTable,
     drop_table: DropTable,
     truncate: Truncate,
+    begin: void,
+    commit: void,
+    rollback: void,
 
     pub const Select = struct {
         /// Source of the data

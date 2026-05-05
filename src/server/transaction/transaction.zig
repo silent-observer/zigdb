@@ -11,3 +11,9 @@ pub const Status = enum(u2) {
     aborted = 2,
     reserved = 3,
 };
+
+pub const ExplicitStatus = enum {
+    inactive,
+    active,
+    broken,
+};

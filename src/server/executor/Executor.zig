@@ -31,6 +31,9 @@ pub fn execute(
         .truncate => try modify.executeTruncate(stmt.truncate, cxt),
         .delete => try modify.executeDelete(stmt.delete, cxt),
         .update => try modify.executeUpdate(stmt.update, cxt),
+        .begin => try executeBegin(cxt),
+        .commit => try executeCommit(cxt),
+        .rollback => try executeRollback(cxt),
         .drop_table => unreachable,
     }
 }
@@ -53,6 +56,53 @@ fn executeSelect(
         // And send them to the client
         try cxt.sender.send(.{ .tuple = tuple });
     }
+}
+
+/// Execute a BEGIN statement
+fn executeBegin(cxt: *Context) !void {
+    // Make sure we're not in a transaction
+    if (cxt.s.explicit_transaction != .inactive) {
+        try cxt.sender.log(cxt.alloc, "ERROR: already in transaction", .{});
+        return Error.ExecutionError;
+    }
+    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    cxt.s.explicit_transaction = .active;
+}
+
+/// Execute a COMMIT statement
+fn executeCommit(cxt: *Context) !void {
+    // Make sure we're in an active transaction
+    switch (cxt.s.explicit_transaction) {
+        .active => {},
+        .inactive => {
+            try cxt.sender.log(cxt.alloc, "ERROR: not in transaction", .{});
+            return Error.ExecutionError;
+        },
+        .broken => {
+            try cxt.sender.log(cxt.alloc, "ERROR: cannot commit because of previous errors", .{});
+            return Error.ExecutionError;
+        },
+    }
+
+    try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .committed);
+    cxt.s.current_tid = .virtual;
+    cxt.s.explicit_transaction = .inactive;
+}
+
+/// Execute a ROLLBACK statement
+fn executeRollback(cxt: *Context) !void {
+    // Make sure we're in a transaction
+    switch (cxt.s.explicit_transaction) {
+        .active, .broken => {},
+        .inactive => {
+            try cxt.sender.log(cxt.alloc, "ERROR: not in transaction", .{});
+            return Error.ExecutionError;
+        },
+    }
+
+    try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .aborted);
+    cxt.s.current_tid = .virtual;
+    cxt.s.explicit_transaction = .inactive;
 }
 
 /// Initialize any DataNode. Call this at the start of execution.

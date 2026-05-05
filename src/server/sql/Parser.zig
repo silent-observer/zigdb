@@ -163,6 +163,9 @@ pub fn parse(p: *Parser) ast.Statement {
 ///           | Update
 ///           | Create
 ///           | Truncate
+///           | Begin
+///           | Commit
+///           | Rollback
 /// ```
 fn parseStmt(p: *Parser) ast.Statement {
     const t = p.peek();
@@ -173,6 +176,9 @@ fn parseStmt(p: *Parser) ast.Statement {
         .update => return p.parseUpdate(),
         .create => return p.parseCreate(),
         .truncate => return p.parseTruncate(),
+        .begin => return p.parseBegin(),
+        .commit => return p.parseCommit(),
+        .rollback => return p.parseRollback(),
         else => {},
     };
 
@@ -407,6 +413,36 @@ fn parseTruncate(p: *Parser) ast.Statement {
     return .{ .truncate = .{
         .name = name,
     } };
+}
+
+/// Parse a BEGIN statement.
+/// ```
+/// Begin = "BEGIN" ";"
+/// ```
+fn parseBegin(p: *Parser) ast.Statement {
+    p.expectKeyword(.begin) catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .begin;
+}
+
+/// Parse a COMMIT statement.
+/// ```
+/// Commit = "COMMIT" ";"
+/// ```
+fn parseCommit(p: *Parser) ast.Statement {
+    p.expectKeyword(.commit) catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .commit;
+}
+
+/// Parse a ROLLBACK statement.
+/// ```
+/// Rollback = "ROLLBACK" ";"
+/// ```
+fn parseRollback(p: *Parser) ast.Statement {
+    p.expectKeyword(.rollback) catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .rollback;
 }
 
 /// Parse a type name.
