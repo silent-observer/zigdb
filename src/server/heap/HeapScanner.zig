@@ -21,7 +21,6 @@ table_id: ids.FullTableId,
 page_id: ids.PageId, // Current page id
 tuple_index: u16, // Current tuple index on the page
 page_count: u32, // Total number of pages
-tuple_count: u64, // Total number of tuples
 page: ?storage.Cache.PinnedPage, // Current page the scanner is reading
 parsed_page: ?HeapPage, // Current page in its parsed state
 cache: *storage.Cache,
@@ -42,7 +41,6 @@ pub fn init(
         .page_id = 1,
         .tuple_index = 0,
         .page_count = header.pages,
-        .tuple_count = header.tuples,
         .page = null,
         .parsed_page = null,
         .cache = cache,

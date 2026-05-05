@@ -190,12 +190,6 @@ pub fn Table(comptime id: tables.TableId) type {
             );
             defer scanner.deinit();
 
-            // Preallocate enough space in the cache
-            self.data.ensureTotalCapacity(
-                self.arena.allocator(),
-                scanner.tuple_count,
-            ) catch oom();
-
             // Add all tuples from the catalog table to the cache
             while (try scanner.next(self.arena.allocator())) |tuple| {
                 self.data.append(self.arena.allocator(), tuple) catch oom();

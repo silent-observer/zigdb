@@ -25,8 +25,6 @@ pub const Header = extern struct {
     magic_value: [8]u8 = Magic,
     // Id of the table
     table_id: ids.FullTableId,
-    // Total number of tuples in the table
-    tuples: u64,
     // Total number of pages in the table (including the header page)
     pages: u16,
     // Reserved space
@@ -70,7 +68,6 @@ pub fn create(self: HeapTable) !void {
 
     const header = Header{
         .table_id = self.table_id,
-        .tuples = 0,
         .pages = 1,
     };
     header.writePage(page.page);
@@ -82,7 +79,7 @@ pub fn truncate(self: HeapTable) !void {
 }
 
 /// Adds a new page to the heap table.
-pub fn addPage(self: HeapTable) !Page.Id {
+pub fn addPage(self: HeapTable) !storage.Cache.PinnedPage {
     // Obtain the header page
     const page = try self.cache.getWriteable(.{
         .file = self.table_id.fullFileId(),
@@ -101,10 +98,9 @@ pub fn addPage(self: HeapTable) !Page.Id {
         .file = self.table_id.fullFileId(),
         .page = page_id,
     });
-    defer self.cache.unpin(new_page);
     @memset(&new_page.page.d, 0);
 
-    return page_id;
+    return new_page;
 }
 
 /// Read the header of the HeapTable.
@@ -124,46 +120,33 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !MemTuple.Pos {
 
     // Go through pages to find a page that can fit this new tuple.
     // Create a new page if no pages have enough free space.
-    const page_id: Page.Id = page_id: for (1..header.pages) |page_id| {
+    const raw_page: storage.Cache.PinnedPage = page_id: for (1..header.pages) |page_id| {
         // Read the page
         const raw_page = try self.cache.get(.{
             .file = self.table_id.fullFileId(),
             .page = @intCast(page_id),
         });
-        defer self.cache.unpin(raw_page);
+        errdefer comptime unreachable;
 
         // Check if the tuple would fit
         const page = HeapPage.parse(raw_page.page, @intCast(page_id));
         if (page.fits(tuple))
-            break :page_id @intCast(page_id);
+            break :page_id raw_page
+        else
+            self.cache.unpin(raw_page);
     } else try self.addPage();
+    defer self.cache.unpin(raw_page);
 
     // Write the tuple to the page
     const pos = block: {
-        const raw_page = try self.cache.getWriteable(.{
-            .file = self.table_id.fullFileId(),
-            .page = page_id,
-        });
-        defer self.cache.unpin(raw_page);
-        var page = HeapPage.parse(raw_page.page, page_id);
+        var page = HeapPage.parse(raw_page.page, raw_page.id.page);
 
         const index = page.add(tuple);
         break :block MemTuple.Pos{
-            .page_id = page_id,
+            .page_id = raw_page.id.page,
             .index = index,
         };
     };
-
-    // Update the number of tuples on the header page
-    {
-        const page = try self.cache.getWriteable(.{
-            .file = self.table_id.fullFileId(),
-            .page = 0,
-        });
-        defer self.cache.unpin(page);
-        const h = Header.fromPage(page.page);
-        h.tuples += 1;
-    }
 
     return pos;
 }
