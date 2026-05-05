@@ -23,7 +23,7 @@ const Cache = @This();
 /// Internal status of a page
 const PageStatus = struct {
     dirty: bool = false,
-    write_pins: std.atomic.Value(u8) = .init(0),
+    write_lock: std.Io.Mutex = .init,
     read_pins: std.atomic.Value(u8) = .init(0),
 };
 
@@ -107,10 +107,8 @@ fn fetch(
     }
 
     if (writeable) {
-        // Take the pin
-        const prev_pins =
-            status.value_ptr.write_pins.fetchAdd(1, .acq_rel);
-        std.debug.assert(prev_pins < 0xFF);
+        // Take the lock
+        try status.value_ptr.write_lock.lock(self.io);
         // If we intend to write to the page, we will have to flush it later
         status.value_ptr.dirty = true;
     } else {
@@ -120,7 +118,7 @@ fn fetch(
         std.debug.assert(prev_pins < 0xFF);
     } // Remove the pin if anything goes wrong
     errdefer if (writeable) {
-        _ = status.value_ptr.write_pins.fetchSub(1, .acq_rel);
+        status.value_ptr.write_lock.unlock(self.io);
     } else {
         _ = status.value_ptr.read_pins.fetchSub(1, .acq_rel);
     };
@@ -151,8 +149,7 @@ pub fn unpin(
     const status = self.page_status.getPtr(pinned_page.id).?;
     // Undo the pin
     if (pinned_page.writeable) {
-        const prev_pins = status.write_pins.fetchSub(1, .acq_rel);
-        std.debug.assert(prev_pins > 0);
+        status.write_lock.unlock(self.io);
     } else {
         const prev_pins = status.read_pins.fetchSub(1, .acq_rel);
         std.debug.assert(prev_pins > 0);
@@ -163,16 +160,15 @@ pub fn unpin(
 pub fn upgrade(
     self: *Cache,
     pinned_page: *PinnedPage,
-) void {
+) !void {
     if (pinned_page.writeable) return;
     // We assume you can't pin a page if it doesn't exist
     const status = self.page_status.getPtr(pinned_page.id).?;
     // Move the pin
-    const prev_read_pins = status.read_pins.fetchAdd(1, .acq_rel);
-    const prev_write_pins = status.write_pins.fetchSub(1, .acq_rel);
+    try status.write_lock.lock(self.io);
 
+    const prev_read_pins = status.read_pins.fetchSub(1, .acq_rel);
     std.debug.assert(prev_read_pins < 0xFF);
-    std.debug.assert(prev_write_pins > 0);
 }
 
 /// Get a read-only page.
@@ -200,7 +196,7 @@ pub fn flush(self: *Cache, force: bool) !void {
     var iter = self.page_status.iterator();
     while (iter.next()) |e| {
         if (e.value_ptr.dirty) {
-            if (!force and e.value_ptr.write_pins.load(.acquire) > 0)
+            if (!force and e.value_ptr.write_lock.state.load(.acquire) != .unlocked)
                 continue;
             const file = self.files.get(e.key_ptr.file) orelse unreachable;
             const data = self.pages.getPtr(e.key_ptr.*) orelse unreachable;
