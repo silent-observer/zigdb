@@ -23,8 +23,8 @@ const Cache = @This();
 /// Internal status of a page
 const PageStatus = struct {
     dirty: bool = false,
-    write_pins: u8 = 0,
-    read_pins: u8 = 0,
+    write_pins: std.atomic.Value(u8) = .init(0),
+    read_pins: std.atomic.Value(u8) = .init(0),
 };
 
 /// Page data after the pin is taken in the cache.
@@ -35,6 +35,8 @@ pub const PinnedPage = struct {
     writeable: bool,
 };
 
+// Mutex to ensure thread safety
+mutex: std.Io.Mutex,
 // Allocator used for all the page data
 gpa: std.mem.Allocator,
 // IO interface
@@ -51,6 +53,7 @@ page_status: std.array_hash_map.Auto(ids.FullPageId, PageStatus),
 /// Initialize the page cache
 pub fn init(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
     return .{
+        .mutex = .init,
         .gpa = gpa,
         .io = io,
         .base_path = base_path,
@@ -79,6 +82,10 @@ fn fetch(
     id: ids.FullPageId,
     writeable: bool,
 ) !PinnedPage {
+    // All of this has to be mutexed since hash maps are not thread-safe
+    try self.mutex.lock(self.io);
+    defer self.mutex.unlock(self.io);
+
     // Try to get the file or create the entry for it if it isn't opened
     const file = self.files.getOrPut(self.gpa, id.file) catch oom();
     // Remove the entry if anything goes wrong
@@ -101,19 +108,21 @@ fn fetch(
 
     if (writeable) {
         // Take the pin
-        std.debug.assert(status.value_ptr.write_pins < 0xFF);
-        status.value_ptr.write_pins += 1;
+        const prev_pins =
+            status.value_ptr.write_pins.fetchAdd(1, .acq_rel);
+        std.debug.assert(prev_pins < 0xFF);
         // If we intend to write to the page, we will have to flush it later
         status.value_ptr.dirty = true;
     } else {
         // Take the pin
-        std.debug.assert(status.value_ptr.read_pins < 0xFF);
-        status.value_ptr.read_pins += 1;
+        const prev_pins =
+            status.value_ptr.read_pins.fetchAdd(1, .acq_rel);
+        std.debug.assert(prev_pins < 0xFF);
     } // Remove the pin if anything goes wrong
     errdefer if (writeable) {
-        status.value_ptr.write_pins -= 1;
+        _ = status.value_ptr.write_pins.fetchSub(1, .acq_rel);
     } else {
-        status.value_ptr.read_pins -= 1;
+        _ = status.value_ptr.read_pins.fetchSub(1, .acq_rel);
     };
 
     // Try to get the page status or create the entry if it isn't in the cache
@@ -142,11 +151,11 @@ pub fn unpin(
     const status = self.page_status.getPtr(pinned_page.id).?;
     // Undo the pin
     if (pinned_page.writeable) {
-        std.debug.assert(status.write_pins > 0);
-        status.write_pins -= 1;
+        const prev_pins = status.write_pins.fetchSub(1, .acq_rel);
+        std.debug.assert(prev_pins > 0);
     } else {
-        std.debug.assert(status.read_pins > 0);
-        status.read_pins -= 1;
+        const prev_pins = status.read_pins.fetchSub(1, .acq_rel);
+        std.debug.assert(prev_pins > 0);
     }
 }
 
@@ -159,10 +168,11 @@ pub fn upgrade(
     // We assume you can't pin a page if it doesn't exist
     const status = self.page_status.getPtr(pinned_page.id).?;
     // Move the pin
-    std.debug.assert(status.read_pins < 0xFF);
-    std.debug.assert(status.write_pins > 0);
-    status.read_pins += 1;
-    status.write_pins -= 1;
+    const prev_read_pins = status.read_pins.fetchAdd(1, .acq_rel);
+    const prev_write_pins = status.write_pins.fetchSub(1, .acq_rel);
+
+    std.debug.assert(prev_read_pins < 0xFF);
+    std.debug.assert(prev_write_pins > 0);
 }
 
 /// Get a read-only page.
@@ -183,10 +193,14 @@ pub fn getWriteable(
 
 /// Flush all dirty pages in the cache to disk.
 pub fn flush(self: *Cache, force: bool) !void {
+    // All of this has to be mutexed since hash maps are not thread-safe
+    try self.mutex.lock(self.io);
+    defer self.mutex.unlock(self.io);
+
     var iter = self.page_status.iterator();
     while (iter.next()) |e| {
         if (e.value_ptr.dirty) {
-            if (!force and e.value_ptr.write_pins > 0)
+            if (!force and e.value_ptr.write_pins.load(.acquire) > 0)
                 continue;
             const file = self.files.get(e.key_ptr.file) orelse unreachable;
             const data = self.pages.getPtr(e.key_ptr.*) orelse unreachable;

@@ -198,7 +198,7 @@ pub fn Table(comptime id: tables.TableId) type {
 
             // Add all tuples from the catalog table to the cache
             while (try scanner.next(self.arena.allocator())) |tuple| {
-                self.data.append(self.arena.allocator(), tuple.tuple) catch oom();
+                self.data.append(self.arena.allocator(), tuple) catch oom();
             }
         }
 
@@ -227,7 +227,7 @@ pub fn Table(comptime id: tables.TableId) type {
         }
 
         /// Convert static custom-built Row to a dynamic MemTuple
-        fn rowToMemTuple(row: Row, alloc: std.mem.Allocator, new_tid: ids.TransactionId) MemTuple {
+        fn rowToMemTuple(row: Row, alloc: std.mem.Allocator, new_tid: ids.RealTransactionId) MemTuple {
             var builder = MemTuple.Builder.init(
                 alloc,
                 tables.descriptor(id),
@@ -310,7 +310,7 @@ pub fn Table(comptime id: tables.TableId) type {
             /// Update the last Row returned by the Scanner
             /// Note: you are not allowed to increase the size of the data in the row,
             /// since the update is performed in place.
-            pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row, tid: ids.TransactionId) !void {
+            pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row, tid: ids.RealTransactionId) !void {
                 // Convert the new row to a tuple
                 const tuple = rowToMemTuple(new, self.table.arena.allocator(), tid);
                 tuple.extended().pos = self.last_pos;
@@ -445,7 +445,7 @@ pub fn Table(comptime id: tables.TableId) type {
         }
 
         /// Adds a new row to the catalog table
-        pub fn add(self: *TSelf, cache: *storage.Cache, row: Row, tid: ids.TransactionId) !void {
+        pub fn add(self: *TSelf, cache: *storage.Cache, row: Row, tid: ids.RealTransactionId) !void {
             const tuple = rowToMemTuple(row, self.arena.allocator(), tid);
 
             // Add the row to the heap table
@@ -477,7 +477,7 @@ pub const Sequence = struct {
         };
     }
 
-    pub fn next(self: Sequence, tid: ids.TransactionId) !u32 {
+    pub fn next(self: Sequence, tid: ids.RealTransactionId) !u32 {
         // Find sequence in the catalog
         var seq_scanner = self.cat.catalog.zdb_seqs.scan(
             &.{.seq_id},

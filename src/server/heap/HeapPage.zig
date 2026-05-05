@@ -95,8 +95,8 @@ const HeapTuple = struct {
     const Header = extern struct {
         count: u16,
         padding: u16 = 0,
-        xmin: ids.TransactionId,
-        xmax: ids.TransactionId,
+        xmin: ids.RealTransactionId,
+        xmax: ids.RealTransactionId,
     };
 
     /// Representation of the HeapTuple data.
@@ -299,7 +299,7 @@ pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple) void {
 
 /// Deletes the i-th tuple on HeapPage.
 /// This updates tuple's xmax to tid.
-pub fn deleteTupleAt(self: *HeapPage, i: u16, tid: ids.TransactionId) void {
+pub fn deleteTupleAt(self: *HeapPage, i: u16, tid: ids.RealTransactionId) void {
     const tuple = self.getHeapTuple(i);
     tuple.ptr.h.xmax = tid;
 }

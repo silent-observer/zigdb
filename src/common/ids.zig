@@ -43,13 +43,13 @@ pub const FullPageId = struct {
     page: PageId,
 };
 
-pub const TransactionId = enum(u32) {
+pub const RealTransactionId = enum(u32) {
     invalid = 0,
     frozen = 1,
     start = 32,
     _,
 
-    pub fn next(self: TransactionId) TransactionId {
+    pub fn next(self: RealTransactionId) RealTransactionId {
         return @enumFromInt(@intFromEnum(self) + 1);
     }
 };

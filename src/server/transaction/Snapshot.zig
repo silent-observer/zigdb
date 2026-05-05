@@ -6,34 +6,29 @@ const ids = @import("common").ids;
 const Snapshot = @This();
 
 log: *TransactionLog,
-xmin: ids.TransactionId,
-xmax: ids.TransactionId,
-my_tid: ids.TransactionId,
+xmax: ids.RealTransactionId,
+my_tid: transaction.Id,
 
-pub fn create(log: *TransactionLog, my_tid: ids.TransactionId) Snapshot {
+pub fn create(log: *TransactionLog, my_tid: transaction.Id) Snapshot {
     return .{
         .log = log,
-        .xmin = my_tid,
-        .xmax = my_tid.next(),
+        .xmax = log.peekNext(),
         .my_tid = my_tid,
     };
 }
 
-pub fn transactionStatus(self: *const Snapshot, tid: ids.TransactionId) !transaction.Status {
-    if (@intFromEnum(tid) < @intFromEnum(self.xmin)) {
-        // The transaction is already dead
-        return try self.log.get(tid);
-    } else if (@intFromEnum(tid) >= @intFromEnum(self.xmax)) {
+pub fn transactionStatus(self: *const Snapshot, tid: ids.RealTransactionId) !transaction.Status {
+    if (@intFromEnum(tid) >= @intFromEnum(self.xmax)) {
         // The transaction is in the future
         return .in_progress;
     } else {
         // Transaction might be active
         // TODO: Concurrent transactions
-        return try self.log.get(tid);
+        return try self.log.get(.{ .real = tid });
     }
 }
 
-pub fn changesVisible(self: *const Snapshot, tid: ids.TransactionId) !bool {
+pub fn changesVisible(self: *const Snapshot, tid: ids.RealTransactionId) !bool {
     if (tid == .invalid) {
         // Frozen transaction is always invisible
         return false;
@@ -44,9 +39,12 @@ pub fn changesVisible(self: *const Snapshot, tid: ids.TransactionId) !bool {
         return true;
     }
 
-    if (tid == self.my_tid) {
-        // We are asking about the current transaction, of course it's visible
-        return true;
+    switch (self.my_tid) {
+        .real => |r| if (tid == r) {
+            // We are asking about the current transaction, of course it's visible
+            return true;
+        },
+        .virtual => {},
     }
 
     return switch (try self.transactionStatus(tid)) {

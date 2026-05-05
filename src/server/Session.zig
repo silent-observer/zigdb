@@ -18,9 +18,15 @@ const Planner = planner.Planner;
 const Session = @This();
 
 gpa: std.mem.Allocator,
-storage_cache: *storage.Cache,
 catalog_cache: *catalog.Cache,
-transaction_log: *transaction.Log,
+db_id: ids.DatabaseId,
+current_tid: transaction.Id,
+shared: Shared,
+
+pub const Shared = struct {
+    storage_cache: *storage.Cache,
+    transaction_log: *transaction.Log,
+};
 
 /// Execute a single statement
 pub fn execute_stmt(
@@ -90,22 +96,17 @@ pub fn execute_stmt(
     // std.debug.print("{f}\n", .{formatted});
 
     {
-        const tid = s.transaction_log.next();
-        errdefer s.transaction_log.set(tid, .aborted) catch {};
+        errdefer s.shared.transaction_log.set(s.current_tid, .aborted) catch {};
 
         const snapshot = transaction.Snapshot.create(
-            s.transaction_log,
-            tid,
+            s.shared.transaction_log,
+            s.current_tid,
         );
 
         // Form the execution context
         var cxt = Context{
             .alloc = arena.allocator(),
-            .catalog_cache = s.catalog_cache,
-            .storage_cache = s.storage_cache,
-            .transaction_log = s.transaction_log,
-            .db_id = 1,
-            .tid = tid,
+            .s = s,
             .snapshot = &snapshot,
             .sender = sender,
         };
@@ -120,7 +121,7 @@ pub fn execute_stmt(
             return;
         };
 
-        try s.transaction_log.set(tid, .committed);
+        try s.shared.transaction_log.set(s.current_tid, .committed);
 
         try sender.send(.success);
     }

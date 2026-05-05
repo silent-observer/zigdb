@@ -189,7 +189,7 @@ pub fn updateInPlace(self: HeapTable, tuple: MemTuple) !void {
 
 /// Delete the tuple directly on the page.
 /// This sets xmax of the tuple to tid.
-pub fn deleteTupleAt(self: HeapTable, pos: MemTuple.Pos, tid: ids.TransactionId) !void {
+pub fn deleteTupleAt(self: HeapTable, pos: MemTuple.Pos, tid: ids.RealTransactionId) !void {
     const raw_page = try self.cache.getWriteable(.{
         .file = self.table_id.fullFileId(),
         .page = pos.page_id,

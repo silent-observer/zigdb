@@ -2,6 +2,44 @@ const std = @import("std");
 
 const zigdb = @import("zigdb");
 
+fn handleConnection(
+    io: std.Io,
+    gpa: std.mem.Allocator,
+    client_stream: std.Io.net.Stream,
+    shared_state: zigdb.Session.Shared,
+) void {
+    defer client_stream.close(io);
+    // Build thread-local catalog cache
+    const catalog_cache = gpa.create(zigdb.catalog.Cache) catch zigdb.common.oom();
+    catalog_cache.* = .init(
+        gpa,
+        1,
+        shared_state.storage_cache,
+    );
+    const catalog_snapshot = zigdb.transaction.Snapshot.create(
+        shared_state.transaction_log,
+        .virtual,
+    );
+    catalog_cache.rebuild(&catalog_snapshot) catch |e| {
+        std.debug.print("Couldn't build catalog cache: {}\n", .{e});
+        return;
+    };
+
+    const session = zigdb.Session{
+        .gpa = gpa,
+        .catalog_cache = catalog_cache,
+        .db_id = 1,
+        .current_tid = .virtual,
+        .shared = shared_state,
+    };
+
+    var server = zigdb.Server.init(io, gpa, client_stream, session);
+    defer server.deinit();
+    server.loop() catch |e| {
+        std.debug.print("Disconnected: {}\n", .{e});
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     // Create the temporary data directory (for testing)
     std.Io.Dir.createDirAbsolute(
@@ -27,14 +65,21 @@ pub fn main(init: std.process.Init) !void {
     defer storage_cache.deinit(); // Don't forget to deinitialize
     defer storage_cache.flush(true) catch {};
 
-    // Initialize and rebuild the catalog cache
-    var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1, &storage_cache);
-    defer catalog_cache.deinit(); // Don't forget to deinitialize
+    {
+        // Initialize and rebuild the catalog cache
+        var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1, &storage_cache);
+        defer catalog_cache.deinit(); // Don't forget to deinitialize
 
-    // Build the actual catalog tables (this recreates the database from scratch)
-    try catalog_cache.build();
+        // Build the actual catalog tables (this recreates the database from scratch)
+        try catalog_cache.build();
+    }
 
     var transaction_log = zigdb.transaction.Log.init(&storage_cache);
+
+    const shared_state = zigdb.Session.Shared{
+        .storage_cache = &storage_cache,
+        .transaction_log = &transaction_log,
+    };
 
     //try catalog_cache.rebuild();
 
@@ -47,19 +92,17 @@ pub fn main(init: std.process.Init) !void {
     var tcp_server = try listen_addr.listen(init.io, .{});
     defer tcp_server.deinit(init.io);
 
-    const client_stream = try tcp_server.accept(init.io);
-    defer client_stream.close(init.io);
+    while (true) {
+        const client_stream = try tcp_server.accept(init.io);
 
-    std.debug.print("Got connection from {f}!\n", .{client_stream.socket.address});
+        std.debug.print("Got connection from {f}!\n", .{client_stream.socket.address});
 
-    const session = zigdb.Session{
-        .gpa = init.gpa,
-        .catalog_cache = &catalog_cache,
-        .storage_cache = &storage_cache,
-        .transaction_log = &transaction_log,
-    };
-
-    var server = zigdb.Server.init(init.io, init.gpa, client_stream, session);
-    defer server.deinit();
-    try server.loop();
+        const thread = try std.Thread.spawn(.{}, handleConnection, .{
+            init.io,
+            init.gpa,
+            client_stream,
+            shared_state,
+        });
+        thread.detach();
+    }
 }

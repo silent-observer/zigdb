@@ -57,8 +57,8 @@ pub const MemTuple = struct {
 
     /// Additional fields taken from heap table.
     pub const ExtendedFields = extern struct {
-        xmin: ids.TransactionId,
-        xmax: ids.TransactionId,
+        xmin: ids.RealTransactionId,
+        xmax: ids.RealTransactionId,
         pos: Pos,
     };
 

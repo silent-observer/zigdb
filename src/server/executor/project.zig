@@ -51,8 +51,9 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     }
     // Add extended fields if needed
     if (plan.descr.has_extended) {
+        std.debug.assert(cxt.s.current_tid == .real);
         b.addExtended(.{
-            .xmin = cxt.tid,
+            .xmin = cxt.s.current_tid.real,
             .xmax = .invalid,
             .pos = .none,
         });
