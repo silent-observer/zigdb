@@ -20,6 +20,15 @@ pub fn init(plan: *Plan.DataNode, cxt: *Context) !void {
     std.debug.assert(plan.action == .full_scan);
     // Initialize the table scanner
     const table_id = plan.action.full_scan.table;
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = table_id,
+        } },
+        .read,
+        cxt.s.thread_id,
+    );
+
     const descr = cxt.s.catalog_cache.descr.getPtr(table_id).?;
     const scanner = try heap.Scanner.init(
         cxt.s.shared.storage_cache,

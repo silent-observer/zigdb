@@ -14,6 +14,15 @@ const oom = common.oom;
 pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
     // We need a real transaction to write data
     cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    // Get a write lock on the table
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = stmt.table,
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
     // Don't forget to deinitialize it at the end
@@ -36,6 +45,15 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
 pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
     // We need a real transaction to write data
     cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    // Get a write lock on the table
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = stmt.table,
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
     // Don't forget to deinitialize it at the end
@@ -58,6 +76,15 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
 pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
     // We need a real transaction to write data
     cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    // Get a write lock on the table
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = stmt.table,
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
     // Don't forget to deinitialize it at the end
@@ -106,6 +133,16 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
 
 /// Execute TRUNCATE statement
 pub fn executeTruncate(stmt: Plan.Statement.Truncate, cxt: *Context) !void {
+    // Get an exclusive lock on the table
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = stmt.table,
+        } },
+        .exclusive,
+        cxt.s.thread_id,
+    );
+    // Perform actual truncation
     try heap.Table.init(
         cxt.s.shared.storage_cache,
         .{

@@ -22,6 +22,7 @@ fn handleConnection(
         .catalog_cache = catalog_cache,
         .db_id = 1,
         .current_tid = .virtual,
+        .thread_id = std.Thread.getCurrentId(),
         .shared = shared_state,
     };
 
@@ -68,9 +69,13 @@ pub fn main(init: std.process.Init) !void {
 
     var transaction_log = zigdb.transaction.Log.init(&storage_cache);
 
+    var lock_manager = zigdb.lock.Manager.init(init.io, init.gpa);
+    defer lock_manager.deinit(init.gpa);
+
     const shared_state = zigdb.Session.Shared{
         .storage_cache = &storage_cache,
         .transaction_log = &transaction_log,
+        .lock_manager = &lock_manager,
     };
 
     //try catalog_cache.rebuild();

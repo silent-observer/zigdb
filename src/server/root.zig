@@ -10,6 +10,7 @@ const planner = @import("planner.zig");
 const Executor = @import("executor/Executor.zig");
 pub const Server = @import("Server.zig");
 pub const Session = @import("Session.zig");
+pub const lock = @import("lock.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");

@@ -7,6 +7,7 @@ const ids = common.ids;
 const catalog = @import("catalog.zig");
 const transaction = @import("transaction.zig");
 const planner = @import("planner.zig");
+const lock = @import("lock.zig");
 const Executor = @import("executor/Executor.zig");
 
 const Lexer = @import("sql/Lexer.zig");
@@ -21,12 +22,14 @@ gpa: std.mem.Allocator,
 catalog_cache: *catalog.Cache,
 db_id: ids.DatabaseId,
 current_tid: transaction.Id,
+thread_id: std.Thread.Id,
 explicit_transaction: transaction.ExplicitStatus = .inactive,
 shared: Shared,
 
 pub const Shared = struct {
     storage_cache: *storage.Cache,
     transaction_log: *transaction.Log,
+    lock_manager: *lock.Manager,
 };
 
 /// Execute a single statement
@@ -147,6 +150,7 @@ pub fn execute_stmt(
         if (s.explicit_transaction == .inactive) {
             try s.shared.transaction_log.set(s.current_tid, .committed);
             s.current_tid = .virtual;
+            try s.shared.lock_manager.unlockAll(s.thread_id);
         }
 
         try sender.send(.success);

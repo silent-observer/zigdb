@@ -87,6 +87,7 @@ fn executeCommit(cxt: *Context) !void {
     try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .committed);
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
+    try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
 }
 
 /// Execute a ROLLBACK statement
@@ -103,6 +104,7 @@ fn executeRollback(cxt: *Context) !void {
     try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .aborted);
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
+    try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
 }
 
 /// Initialize any DataNode. Call this at the start of execution.

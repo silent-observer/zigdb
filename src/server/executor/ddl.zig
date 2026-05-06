@@ -10,6 +10,23 @@ const heap = @import("../heap.zig");
 pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void {
     // We need a real transaction to write data
     cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    // Get a write lock on the catalog tables
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = @intFromEnum(catalog.tables.TableId.zdb_rels),
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = @intFromEnum(catalog.tables.TableId.zdb_attrs),
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
     // Fetch the next table id from the sequence
     const table_id: ids.TableId = try catalog.Sequence.init(
         .zdb_seq_table_id,
