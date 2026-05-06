@@ -345,6 +345,7 @@ pub fn Table(comptime id: tables.TableId) type {
                         ", not uint32, cannot use catalog scan");
             }
 
+            // Convert attribute ids into real indexes
             const keys = comptime block: {
                 var keys: [attrs.len]u8 = undefined;
                 for (attrs, &keys) |a, *k|
@@ -392,6 +393,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     " is " ++ @typeName(tables.Attr(attr_text)) ++
                     ", not text, cannot use catalog scan");
 
+            // Convert attribute ids into real indexes
             const keys = comptime block: {
                 var keys: [attrs.len]u8 = undefined;
                 for (attrs, &keys) |a, *k|
@@ -450,6 +452,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     .table = @intFromEnum(id),
                 },
             ).addOneTuple(tuple);
+            // Set the position we inserted this tuple into
             tuple.extended().pos = pos;
 
             // Add the row to the cache too
@@ -458,11 +461,13 @@ pub fn Table(comptime id: tables.TableId) type {
     };
 }
 
+/// A representation of a sequence stored in the catalog
 pub const Sequence = struct {
     id: tables.SequenceId,
     cat: *CatalogCache,
     cache: *storage.Cache,
 
+    /// Initialize the sequence
     pub fn init(id: tables.SequenceId, cat: *CatalogCache, cache: *storage.Cache) Sequence {
         return .{
             .id = id,
@@ -471,6 +476,7 @@ pub const Sequence = struct {
         };
     }
 
+    /// Get the next number from the sequence
     pub fn next(self: Sequence, tid: ids.RealTransactionId) !u32 {
         // Find sequence in the catalog
         var seq_scanner = self.cat.catalog.zdb_seqs.scan(

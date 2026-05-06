@@ -3,6 +3,13 @@
 //! The basic structure is as follows:
 //! - Header (8 bytes)
 //!    - pointer to TupleDescrptor (8 bytes)
+//! - Extended fields (16 bytes) - optional!
+//!    - xmin (4 bytes) - ID of a transaction that inserted this tuple.
+//!    - xmax (4 bytes) - ID of a transaction that deleted this tuple.
+//!    - pos (8 bytes) - Position of the tuple in a table
+//!        - page_id (4 bytes) - Page number in the file
+//!        - index (2 bytes) - Index of a tuple on a page
+//!        - padding (2 bytes)
 //! - Array of offsets (2 * N + 2 bytes)
 //!    - offsets[0] (2 bytes)
 //!    - offsets[1] (2 bytes)
@@ -13,6 +20,8 @@
 //! - Data section (offset[N] bytes)
 //!
 //! where N is the number of attributes in the TupleDescriptor.
+//! The presence or absence of extended fields is determined by
+//! has_extended flag in the TupleDescriptor.
 //!
 //! The data in the tuple is stored sequentially after the array of offsets.
 //! The first N offsets contain the offset of the N attributes, counting from
@@ -57,9 +66,9 @@ pub const MemTuple = struct {
 
     /// Additional fields taken from heap table.
     pub const ExtendedFields = extern struct {
-        xmin: ids.RealTransactionId,
-        xmax: ids.RealTransactionId,
-        pos: Pos,
+        xmin: ids.RealTransactionId, // Transaction that inserted this tuple
+        xmax: ids.RealTransactionId, // Transaction that deleted this tuple
+        pos: Pos, // Position of the tuple in the table
     };
 
     /// Position of a tuple in a table.
@@ -68,7 +77,7 @@ pub const MemTuple = struct {
     pub const Pos = extern struct {
         page_id: ids.PageId,
         index: u16,
-        padding: [6]u8 = .{ 0, 0, 0, 0, 0, 0 },
+        padding: [2]u8 = .{ 0, 0 },
 
         pub const none = Pos{
             .page_id = 0,
@@ -95,6 +104,7 @@ pub const MemTuple = struct {
         };
 
         pub const Extended = extern struct {
+            // Optional extended fields
             ext: ExtendedFields,
             // Dummy field to represent array of offsets:
             // actually contains N+1 offsets for N attributes.
@@ -180,6 +190,7 @@ pub const MemTuple = struct {
         return d.data[start..end];
     }
 
+    /// Access extended fields in this tuple (assume they exist).
     pub fn extended(self: MemTuple) *MemTuple.ExtendedFields {
         return self.details().ext.?;
     }
@@ -193,6 +204,8 @@ pub const MemTuple = struct {
             d.data.len;
     }
 
+    /// Allocate enough space for the tuple (without initializing anything).
+    /// Ensures correct alignment.
     pub fn allocUnitialized(alloc: std.mem.Allocator, s: usize) MemTuple {
         const bytes = alloc.alignedAlloc(
             u8,

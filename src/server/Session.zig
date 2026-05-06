@@ -1,3 +1,5 @@
+//! Session state, stores all the global state necessary to execute statements.
+
 const std = @import("std");
 
 const common = @import("common");
@@ -18,17 +20,27 @@ const Planner = planner.Planner;
 
 const Session = @This();
 
+/// Global allocator
 gpa: std.mem.Allocator,
+/// Cache of catalog tables.
 catalog_cache: *catalog.Cache,
+/// Id of the current database.
 db_id: ids.DatabaseId,
+/// Id of the current transaction.
 current_tid: transaction.Id,
+/// Id of the executor thread.
 thread_id: std.Thread.Id,
+/// Status of an explicit transaction.
 explicit_transaction: transaction.ExplicitStatus = .inactive,
+/// Shared state, this is memory shared between all threads.
 shared: Shared,
 
 pub const Shared = struct {
+    /// Cache of disk pages
     storage_cache: *storage.Cache,
+    /// Log of transaction statuses
     transaction_log: *transaction.Log,
+    /// Manager for various locks
     lock_manager: *lock.Manager,
 };
 
@@ -115,11 +127,14 @@ pub fn execute_stmt(
 
     {
         errdefer if (s.explicit_transaction == .inactive) {
+            // If something went wrong in an implicit transaction, abort it
             s.shared.transaction_log.set(s.current_tid, .aborted) catch {};
         } else {
+            // If something went wrong in an explicit transaction, mark it as broken
             s.explicit_transaction = .broken;
         };
 
+        // Take a snapshot at the start of the command
         const snapshot = transaction.Snapshot.create(
             s.shared.transaction_log,
             s.current_tid,
@@ -148,11 +163,14 @@ pub fn execute_stmt(
         };
 
         if (s.explicit_transaction == .inactive) {
+            // Commit the transaction at the end, if it was implicit
             try s.shared.transaction_log.set(s.current_tid, .committed);
             s.current_tid = .virtual;
+            // Unlock all locks
             try s.shared.lock_manager.unlockAll(s.thread_id);
         }
 
+        // Send the success message
         try sender.send(.success);
     }
 }

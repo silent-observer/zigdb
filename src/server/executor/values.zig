@@ -31,6 +31,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     cxt.alloc.destroy(state);
 }
 
+/// Fetch one tuple from Values DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) ?common.MemTuple {
     std.debug.assert(plan.action == .values);
     _ = cxt;

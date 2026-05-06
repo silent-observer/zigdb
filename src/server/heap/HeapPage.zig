@@ -11,7 +11,7 @@
 //!
 //! To summarize, the page has the following structure:
 //! - Header (2 bytes)
-//!   - count (2 bytes)
+//!   - count (2 bytes) - number of tuples on the page
 //! - Offsets (2*count bytes)
 //!   - offsets[0] (2 bytes)
 //!   - offsets[1] (2 bytes)
@@ -30,8 +30,11 @@
 //! Each heap tuple has a structure similar to MemTuple (see data/tuple.zig).
 //! The main difference is that the header contains 2-byte atribute count instead
 //! of pointer to tuple descriptor. The structure is the following:
-//! - Header (2 bytes)
-//!    - count (2 bytes)
+//! - Header (12 bytes)
+//!    - count (2 bytes) - number of attributes
+//!    - padding (2 bytes)
+//!    - xmin (4 bytes) - ID of transaction that inserted this tuple
+//!    - xmax (4 bytes) - ID of transaction that deleted this tuple
 //! - Array of offsets (2 * count + 2 bytes)
 //!    - offsets[0] (2 bytes)
 //!    - offsets[1] (2 bytes)
@@ -93,10 +96,10 @@ const HeapTuple = struct {
     ptr: *align(1) Data,
 
     const Header = extern struct {
-        count: u16,
+        count: u16, // Number of attributes
         padding: u16 = 0,
-        xmin: ids.RealTransactionId,
-        xmax: ids.RealTransactionId,
+        xmin: ids.RealTransactionId, // ID of transaction that inserted this tuple
+        xmax: ids.RealTransactionId, // ID of transaction that deleted this tuple
     };
 
     /// Representation of the HeapTuple data.
@@ -201,6 +204,7 @@ const HeapTuple = struct {
         const mem_len = mem.len();
 
         const dest_tuple: HeapTuple = .{ .ptr = @ptrCast(dest) };
+        // Write header
         dest_tuple.ptr.h = .{
             .count = @intCast(mem_len),
             .xmin = mem.ptr.tail.extended.ext.xmin,
