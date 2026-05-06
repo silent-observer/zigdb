@@ -3,8 +3,10 @@
 
 /// Id of the database
 pub const DatabaseId = u32;
+/// Id of any database object
+pub const ObjectId = u32;
 /// Id of a table inside a database
-pub const TableId = u32;
+pub const TableId = ObjectId;
 /// Full Id sufficient to identify a specific table
 pub const FullTableId = extern struct {
     db: DatabaseId,
@@ -14,7 +16,6 @@ pub const FullTableId = extern struct {
         return .{ .heap = self };
     }
 };
-pub const HeapFileId = TableId;
 
 pub const TLogFileId = u32;
 

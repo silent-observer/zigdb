@@ -1,8 +1,10 @@
 const std = @import("std");
 const oom = @import("utils.zig").oom;
+const ObjectId = @import("ids.zig").ObjectId;
 
 /// A possible type of a value in the database
 pub const DBType = enum(u32) {
+    oid,
     uint1,
     uint2,
     uint4,
@@ -17,12 +19,14 @@ pub const DBType = enum(u32) {
     /// Can this type be silently converted to other type?
     pub fn convertsTo(self: DBType, other: DBType) bool {
         if (std.meta.eql(self, other)) return true;
+        if (self == .oid and other == .uint4) return true;
         return false;
     }
 
     /// Width of this type. Null if the exact width is unknown.
     pub fn width(self: DBType) ?usize {
         return switch (self) {
+            .oid => 4,
             .uint1, .int1 => 1,
             .uint2, .int2 => 2,
             .uint4, .int4 => 4,
@@ -66,6 +70,7 @@ pub const DBType = enum(u32) {
     /// but can be approximate for variable-width types.
     pub fn approximateWidth(self: DBType) usize {
         return switch (self) {
+            .oid => 4,
             .uint1, .int1 => 1,
             .uint2, .int2 => 2,
             .uint4, .int4 => 4,
@@ -78,6 +83,7 @@ pub const DBType = enum(u32) {
     /// Check if the DBType matches comptime-known type T.
     pub fn checkType(self: DBType, T: type) bool {
         return switch (self) {
+            .oid => T == ObjectId,
             .uint1 => T == u8,
             .uint2 => T == u16,
             .uint4 => T == u32,

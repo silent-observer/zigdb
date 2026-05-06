@@ -31,6 +31,7 @@ pub const Value = union(enum) {
     /// Check if type of Value matches given DBType.
     pub fn checkType(v: Value, dbtype: t.DBType) bool {
         switch (dbtype) {
+            .oid,
             .int1,
             .int2,
             .int4,

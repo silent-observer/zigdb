@@ -223,7 +223,7 @@ pub const MemTuple = struct {
             .int8 => return .{ .int = @intCast(std.mem.bytesToValue(i64, data)) },
             .uint1 => return .{ .int = @intCast(std.mem.bytesToValue(u8, data)) },
             .uint2 => return .{ .int = @intCast(std.mem.bytesToValue(u16, data)) },
-            .uint4 => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
+            .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .bool => return .{ .bool = std.mem.bytesToValue(bool, data) },
             .text => return .{ .text = data },
@@ -254,7 +254,7 @@ pub const MemTuple = struct {
             .int8 => std.mem.bytesAsValue(i64, data).* = @intCast(val.int),
             .uint1 => std.mem.bytesAsValue(u8, data).* = @intCast(val.int),
             .uint2 => std.mem.bytesAsValue(u16, data).* = @intCast(val.int),
-            .uint4 => std.mem.bytesAsValue(u32, data).* = @intCast(val.int),
+            .uint4, .oid => std.mem.bytesAsValue(u32, data).* = @intCast(val.int),
             .uint8 => std.mem.bytesAsValue(u64, data).* = @intCast(val.int),
             .bool => std.mem.bytesAsValue(bool, data).* = val.bool,
             .text => @memcpy(data, val.text),
@@ -365,7 +365,7 @@ pub const MemTuple = struct {
                     const x: u16 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },
-                .uint4 => {
+                .uint4, .oid => {
                     const x: u32 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },

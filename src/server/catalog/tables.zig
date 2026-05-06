@@ -43,7 +43,7 @@ const common = @import("common");
 const oom = common.oom;
 
 /// Fixed table ids of catalog tables.
-pub const TableId = enum(u32) {
+pub const TableId = enum(common.ids.TableId) {
     zdb_rels = 1,
     zdb_attrs = 2,
     zdb_seqs = 3,
@@ -67,7 +67,7 @@ pub const SystemAttribute = enum {
 };
 
 /// Fixed sequence ids of catalog sequences.
-pub const SequenceId = enum(u32) {
+pub const SequenceId = enum(common.ids.TableId) {
     zdb_seq_table_id = 0,
     zdb_seq_seq_id = 1,
 };
@@ -94,7 +94,7 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .rel_id,
-                .db_type = .uint4,
+                .db_type = .oid,
                 .t = u32,
             },
             AttributeEntry{
@@ -109,7 +109,7 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .attr_rel_id,
-                .db_type = .uint4,
+                .db_type = .oid,
                 .t = u32,
             },
             AttributeEntry{
@@ -134,7 +134,7 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .seq_id,
-                .db_type = .uint4,
+                .db_type = .oid,
                 .t = u32,
             },
             AttributeEntry{
