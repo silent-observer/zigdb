@@ -15,7 +15,7 @@ transaction_log: *transaction.Log, // Transaction log
 
 db_id: ids.DatabaseId, // Database id
 tid: ids.TransactionId, // Current transaction id
-snapshot: *const transaction.Snapshot,
+snapshot: *const transaction.Snapshot, // Current snapshot
 
 sender: common.network.Message.Sender, // Message sender
 

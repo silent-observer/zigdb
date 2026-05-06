@@ -1,10 +1,57 @@
+//! Description of the network protocol used for communcation between
+//! the server and clients.
+//!
+//! This is how the communication between server and client generally proceeds:
+//! Server: ready (client can send the next query)
+//! Client: query (client sends an SQL query to execute)
+//! Server: log (server sends text messages that can correspond to logs, warnings or errors)
+//!         ...
+//!         log
+//! Server: tuple_descriptor (server sends the tuple descriptor for the resulting data)
+//! Server: tuple (server sends tuples from the result data one by one)
+//!         ...
+//!         tuple
+//! Server: success/err (server sends a success or error message at the end)
+//! Server: ready (server is ready for the next query)
+//! Client: ...
+//!
+//! Queries that don't return data don't send "tuple_descriptor" and "tuple" messages,
+//! and instead immediately send success/err on completion.
+//! Also, the client can send "exit" message instead of a query to close the connection.
+
 const std = @import("std");
 const t = @import("types.zig");
 const MemTuple = @import("tuple.zig").MemTuple;
 const oom = @import("utils.zig").oom;
 
+/// Default port for the server
 pub const default_port = 17301;
 
+/// Message that can be sent through the network.
+///
+/// Each message has the following format:
+/// - tag (1 byte) - the type of the message
+/// - size (4 bytes) - how many bytes of data there are
+/// - data ("size" bytes) - the actual data, the exact contents depend on the tag
+///
+/// "success", "err", "ready" and "exit" messages have no data, so their size is always 0.
+/// "log" and "query" messages have raw text as their data.
+/// "tuple" message data is the same format as MemTuple, but without the TupleDescriptor
+/// pointer in the header.
+///
+/// "tuple_descriptor" message has the following format:
+/// - tag = 'D' (1 byte) - the type of the message
+/// - size (4 bytes) - how many bytes of data there are
+/// - has_extended (1 byte) - whether or not the tuples have extended fields
+/// - attrs count (2 bytes) - number of attributes
+/// - 0th attr type (4 bytes) - type of attr 0
+/// - 0th attr name length (1 byte) - length of attr 0 name
+/// - 0th attr name (? bytes) - the name itself of attr 0
+/// - 1st attr type (4 bytes)
+///   ...
+/// - Nth attr name (? bytes)
+///
+/// All integers in the messages are little-endian
 pub const Message = union(Tag) {
     log: []const u8,
     query: []const u8,
@@ -26,6 +73,7 @@ pub const Message = union(Tag) {
         exit = 'X',
     };
 
+    /// Calculate the size of data for the message
     fn calcSize(m: Message) usize {
         return switch (m) {
             .log => |l| l.len,
@@ -42,6 +90,7 @@ pub const Message = union(Tag) {
         };
     }
 
+    /// Serialize the message into bytes and write them into a Writer
     pub fn write(m: Message, w: *std.Io.Writer) !void {
         try w.writeByte(@intFromEnum(std.meta.activeTag(m)));
         const size = m.calcSize();
@@ -69,6 +118,7 @@ pub const Message = union(Tag) {
 
     pub const Error = error{MalformedMessage};
 
+    /// Read bytes from a Reader and deserialize them into a Message
     pub fn read(alloc: std.mem.Allocator, r: *std.Io.Reader) !Message {
         const tag = std.enums.fromInt(Tag, try r.takeByte()) orelse
             return Error.MalformedMessage;
@@ -116,12 +166,14 @@ pub const Message = union(Tag) {
         }
     }
 
+    /// Convenience struct to easily send messages through the network
     pub const Sender = struct {
         writer: *std.Io.Writer,
 
         pub fn send(self: Sender, msg: Message) !void {
             std.debug.print("Sent {}\n", .{msg});
             try msg.write(self.writer);
+            // Don't forget to flush or the message won't get sent
             try self.writer.flush();
         }
 

@@ -104,10 +104,12 @@ fn advanceOne(self: *HeapScanner) !void {
     self.closePage();
 }
 
+/// Check if the tuple is actually visible in this snapshot
 fn tupleVisible(self: *HeapScanner, tuple: MemTuple) !bool {
     const ext = tuple.extended();
     const creation_visible = try self.snapshot.changesVisible(ext.xmin);
     const deletion_visible = try self.snapshot.changesVisible(ext.xmax);
+    // The tuple is visible if we can see it was created, but we can't see it was deleted.
     return creation_visible and !deletion_visible;
 }
 

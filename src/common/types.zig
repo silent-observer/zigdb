@@ -46,6 +46,8 @@ pub const DBType = enum(u32) {
         };
     }
 
+    /// Determine the maximum integer size between two types.
+    /// Unsigned types are considered bigger than signed.
     pub fn maxIntType(self: DBType, other: DBType) DBType {
         if (std.meta.eql(self, other))
             return self

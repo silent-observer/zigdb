@@ -1,3 +1,5 @@
+//! Session state, stores all the global state necessary to execute statements.
+
 const std = @import("std");
 
 const common = @import("common");
@@ -17,9 +19,13 @@ const Planner = planner.Planner;
 
 const Session = @This();
 
+/// Global allocator
 gpa: std.mem.Allocator,
+/// Cache of disk pages
 storage_cache: *storage.Cache,
+/// Cache of catalog tables
 catalog_cache: *catalog.Cache,
+/// Log of transaction statuses
 transaction_log: *transaction.Log,
 
 /// Execute a single statement
@@ -90,9 +96,12 @@ pub fn execute_stmt(
     // std.debug.print("{f}\n", .{formatted});
 
     {
+        // Start a new transaction for each statement
         const tid = s.transaction_log.next();
+        // If anything goes wrong, abort it
         errdefer s.transaction_log.set(tid, .aborted) catch {};
 
+        // Take a snapshot at the start of the command
         const snapshot = transaction.Snapshot.create(
             s.transaction_log,
             tid,
@@ -120,8 +129,10 @@ pub fn execute_stmt(
             return;
         };
 
+        // Commit the transaction at the end
         try s.transaction_log.set(tid, .committed);
 
+        // Send the success message
         try sender.send(.success);
     }
 }

@@ -223,13 +223,13 @@ fn evalConstExpression(
         .unary => |u| {
             const x = try p.evalConstExpression(u.expr.*, cxt);
             switch (u.op) {
-                .neg => {
+                .neg => { // -x
                     return common.TypedValue{
                         .v = .{ .int = -x.v.int },
                         .t = t,
                     };
                 },
-                .not => {
+                .not => { // not x
                     return common.TypedValue{
                         .v = .{ .bool = !x.v.bool },
                         .t = t,
@@ -241,7 +241,7 @@ fn evalConstExpression(
             const lhs = try p.evalConstExpression(b.left.*, cxt);
             const rhs = try p.evalConstExpression(b.right.*, cxt);
             switch (b.op) {
-                .add, .sub, .mul, .div => {
+                .add, .sub, .mul, .div => { // +, -, *, /
                     const v = switch (b.op) {
                         .add => lhs.v.int + rhs.v.int,
                         .sub => lhs.v.int - rhs.v.int,
@@ -254,7 +254,7 @@ fn evalConstExpression(
                         .t = t,
                     };
                 },
-                .@"and", .@"or" => {
+                .@"and", .@"or" => { // and, or
                     const v = switch (b.op) {
                         .@"and" => lhs.v.bool and rhs.v.bool,
                         .@"or" => lhs.v.bool or rhs.v.bool,
@@ -265,7 +265,7 @@ fn evalConstExpression(
                         .t = t,
                     };
                 },
-                .eq, .ne => {
+                .eq, .ne => { // =, <>
                     const v = switch (lhs.v) {
                         .bool => lhs.v.bool == rhs.v.bool,
                         .int => lhs.v.int == rhs.v.int,
@@ -276,7 +276,7 @@ fn evalConstExpression(
                         .t = t,
                     };
                 },
-                .lt, .gt, .le, .ge => {
+                .lt, .gt, .le, .ge => { // <, >, <=, >=
                     const v = switch (b.op) {
                         .lt => lhs.v.int < rhs.v.int,
                         .gt => lhs.v.int > rhs.v.int,
@@ -418,7 +418,7 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     } });
 }
 
-/// Plan Update statement
+/// Plan UPDATE statement
 fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     // Plan the data source for input
     const table = try p.findTable(stmt.name);
@@ -540,6 +540,7 @@ fn planValues(
     });
 }
 
+/// Try to infer a type of an expression, given the context of the currently available variables.
 fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDescriptor) Error!common.DBType {
     switch (expr) {
         .variable => |v| { // Variable expression
@@ -558,7 +559,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
             const lhs = try p.inferExprType(u.left.*, cxt);
             const rhs = try p.inferExprType(u.right.*, cxt);
             switch (u.op) {
-                .add, .sub, .mul, .div => {
+                .add, .sub, .mul, .div => { // Can do arithmetic only on numbers
                     if (!lhs.isNumber()) {
                         p.addError("Cannot use arithmetic operator on type {}", .{lhs});
                         return Error.TypeError;
@@ -567,7 +568,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                         return Error.TypeError;
                     } else return lhs.maxIntType(rhs);
                 },
-                .@"and", .@"or" => {
+                .@"and", .@"or" => { // Can do and/or only on booleans
                     if (lhs != .bool) {
                         p.addError("Cannot use logic operator on type {}", .{lhs});
                         return Error.TypeError;
@@ -576,7 +577,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                         return Error.TypeError;
                     } else return .bool;
                 },
-                .eq, .ne => {
+                .eq, .ne => { // Can check equality of numbers and values of the same type
                     const both_numbers = lhs.isNumber() and rhs.isNumber();
                     const same_type = std.meta.eql(lhs, rhs);
                     if (!both_numbers and !same_type) {
@@ -584,7 +585,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                         return Error.TypeError;
                     } else return .bool;
                 },
-                .lt, .gt, .le, .ge => {
+                .lt, .gt, .le, .ge => { // Can only compare numbers
                     const both_numbers = lhs.isNumber() and rhs.isNumber();
                     if (!both_numbers) {
                         p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
@@ -597,13 +598,13 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
     }
 }
 
-// Plan the scalar node for an expression (in the context of some tuple descriptor).
+/// Plan the scalar node for an expression (in the context of some tuple descriptor).
 fn planExpression(
     p: *Planner,
     expr: ast.Expression,
     cxt: *const common.TupleDescriptor,
 ) Error!Plan.ScalarNode {
-    // Fast return for constant expressions
+    // Fast path for constant expressions
     if (isConstExpression(expr)) {
         // Evaluate the constant
         const v = try p.evalConstExpression(expr, cxt);
@@ -614,6 +615,7 @@ fn planExpression(
         };
     }
 
+    // Calculate the resulting type
     const t = try p.inferExprType(expr, cxt);
 
     switch (expr) {
