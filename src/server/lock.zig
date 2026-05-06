@@ -22,37 +22,61 @@ pub const Id = union(enum) {
 
 const Lock = struct {
     granted_modes: Mode.Set = .empty,
-    waiting_modes: Mode.Set = .empty,
     condition: std.Io.Condition = .init,
     granted_list: std.DoublyLinkedList = .{},
     waiting_list: std.DoublyLinkedList = .{},
 
-    const Holder = struct {
-        thread: std.Thread.Id,
-        mode: Mode,
-        node: std.DoublyLinkedList.Node = .{},
-
-        fn findInList(list: std.DoublyLinkedList, thread: std.Thread.Id) ?*Holder {
-            var node = list.last;
-            while (node) |n| {
-                const h: *Holder = @fieldParentPtr("node", n);
-                if (h.thread == thread)
-                    return h;
-                node = n.prev;
-            }
-            return null;
+    fn findGranted(lock: *Lock, thread: std.Thread.Id) ?*ThreadLock {
+        var node = lock.granted_list.first;
+        while (node) |n| {
+            const h: *ThreadLock = @fieldParentPtr("per_lock_node", n);
+            if (h.thread == thread)
+                return h;
+            node = n.next;
         }
-    };
+        return null;
+    }
+
+    fn findWaiting(lock: *Lock, thread: std.Thread.Id) ?*Waiting {
+        var node = lock.waiting_list.last;
+        while (node) |n| {
+            const h: *Waiting = @fieldParentPtr("node", n);
+            if (h.thread == thread)
+                return h;
+            node = n.prev;
+        }
+        return null;
+    }
 };
 
 const ThreadInfo = struct {
     waiting_lock: ?Id = null,
-    held_locks: std.SinglyLinkedList = .{},
+    granted_locks: std.DoublyLinkedList = .{},
 
-    const HeldLock = struct {
-        lock: Id,
-        node: std.SinglyLinkedList.Node = .{},
-    };
+    fn findGranted(thread: *ThreadInfo, lock: Id) ?*ThreadLock {
+        var node = thread.granted_locks.first;
+        while (node) |n| {
+            const h: *ThreadLock = @fieldParentPtr("per_thread_node", n);
+            if (h.lock == lock)
+                return h;
+            node = n.next;
+        }
+        return null;
+    }
+};
+
+const ThreadLock = struct {
+    lock: Id,
+    thread: std.Thread.Id,
+    modes: Mode.Set,
+    per_lock_node: std.DoublyLinkedList.Node = .{},
+    per_thread_node: std.DoublyLinkedList.Node = .{},
+};
+
+const Waiting = struct {
+    thread: std.Thread.Id,
+    mode: Mode,
+    node: std.DoublyLinkedList.Node = .{},
 };
 
 pub const Manager = struct {
@@ -63,13 +87,13 @@ pub const Manager = struct {
         Lock,
         .{ .growable = false },
     ),
-    holder_pool: std.heap.MemoryPoolExtra(
-        Lock.Holder,
+    thread_lock_pool: std.heap.MemoryPoolExtra(
+        ThreadLock,
         .{ .growable = false },
     ),
     threads: std.array_hash_map.Auto(std.Thread.Id, ThreadInfo),
-    held_lock_pool: std.heap.MemoryPoolExtra(
-        ThreadInfo.HeldLock,
+    waiting_pool: std.heap.MemoryPoolExtra(
+        Waiting,
         .{ .growable = false },
     ),
 
@@ -86,12 +110,12 @@ pub const Manager = struct {
             Lock,
             .{ .growable = false },
         ).initCapacity(gpa, max_locks) catch common.oom();
-        const holder_pool = std.heap.MemoryPoolExtra(
-            Lock.Holder,
+        const thread_lock_pool = std.heap.MemoryPoolExtra(
+            ThreadLock,
             .{ .growable = false },
         ).initCapacity(gpa, max_locks) catch common.oom();
-        const held_lock_pool = std.heap.MemoryPoolExtra(
-            ThreadInfo.HeldLock,
+        const waiting_pool = std.heap.MemoryPoolExtra(
+            Waiting,
             .{ .growable = false },
         ).initCapacity(gpa, max_locks) catch common.oom();
 
@@ -100,17 +124,17 @@ pub const Manager = struct {
             .mutex = .init,
             .locks = locks,
             .lock_pool = lock_pool,
-            .holder_pool = holder_pool,
+            .thread_lock_pool = thread_lock_pool,
+            .waiting_pool = waiting_pool,
             .threads = threads,
-            .held_lock_pool = held_lock_pool,
         };
     }
 
     pub fn deinit(self: *Manager, gpa: std.mem.Allocator) void {
         self.locks.deinit(gpa);
-        self.holder_pool.deinit(gpa);
         self.lock_pool.deinit(gpa);
-        self.held_lock_pool.deinit(gpa);
+        self.thread_lock_pool.deinit(gpa);
+        self.waiting_pool.deinit(gpa);
     }
 
     fn canGrant(l: *const Lock, mode: Mode, me: std.Thread.Id) bool {
@@ -121,36 +145,53 @@ pub const Manager = struct {
         }
 
         // Something conflicts, but maybe it's our own lock?
-        var holder = l.granted_list.first;
-        while (holder) |n| {
-            const h: *Lock.Holder = @fieldParentPtr("node", n);
-            if (possible_conflicts.contains(h.mode) and h.thread != me) {
+        var tl_node = l.granted_list.first;
+        while (tl_node) |n| {
+            const tl: *ThreadLock = @fieldParentPtr("per_lock_node", n);
+            if (tl.thread != me and
+                !possible_conflicts.intersectWith(tl.modes).eql(.empty))
+            {
                 // Found someone else holding a conflicting lock, no luck...
                 return false;
             }
-            holder = n.next;
+            tl_node = n.next;
         }
         // Found no one, yay!
         return true;
     }
 
-    fn rebuildWaitingSet(l: *Lock) void {
-        l.waiting_modes = .empty;
-        var holder = l.waiting_list.first;
-        while (holder) |n| {
-            const h: *Lock.Holder = @fieldParentPtr("node", n);
-            l.waiting_modes.setPresent(h.mode, true);
-            holder = n.next;
+    fn rebuildGrantedSet(l: *Lock) void {
+        l.granted_modes = .empty;
+        var tl_node = l.granted_list.first;
+        while (tl_node) |n| {
+            const tl: *ThreadLock = @fieldParentPtr("per_lock_node", n);
+            l.granted_modes.setUnion(tl.modes);
+            tl_node = n.next;
         }
     }
 
-    fn rebuildGrantedSet(l: *Lock) void {
-        l.granted_modes = .empty;
-        var holder = l.granted_list.first;
-        while (holder) |n| {
-            const h: *Lock.Holder = @fieldParentPtr("node", n);
-            l.granted_modes.setPresent(h.mode, true);
-            holder = n.next;
+    fn grant(self: *Manager, l: *Lock, id: Id, mode: Mode, me: std.Thread.Id) void {
+        l.granted_modes.setPresent(mode, true);
+        if (l.findGranted(me)) |tl| {
+            // We already have some locks here, just add a new one
+            tl.modes.setPresent(mode, true);
+            std.debug.print("{}: Additionally got {} lock on {}\n", .{ me, mode, id });
+        } else {
+            // We have to add a new entry to the lock list
+            const tl = self.thread_lock_pool.create(undefined) catch unreachable;
+            tl.* = .{
+                .lock = id,
+                .thread = me,
+                .modes = .initOne(mode),
+            };
+            l.granted_list.prepend(&tl.per_lock_node);
+
+            // Maybe we even have to make the thread entry
+            const ti = self.threads.getOrPutAssumeCapacity(me);
+            if (!ti.found_existing)
+                ti.value_ptr.* = .{};
+
+            ti.value_ptr.granted_locks.prepend(&tl.per_thread_node);
         }
     }
 
@@ -167,32 +208,18 @@ pub const Manager = struct {
         const l = r.value_ptr.*;
 
         if (canGrant(l, mode, me)) {
-            l.granted_modes.setPresent(mode, true);
-            const new_holder = self.holder_pool.create(undefined) catch unreachable;
-            new_holder.* = .{
-                .thread = me,
-                .mode = mode,
-            };
-            l.granted_list.prepend(&new_holder.node);
-
-            {
-                const ti = self.threads.getOrPutAssumeCapacity(me);
-                if (!ti.found_existing)
-                    ti.value_ptr.* = .{};
-
-                const held_lock = self.held_lock_pool.create(undefined) catch unreachable;
-                held_lock.* = .{ .lock = id };
-                ti.value_ptr.held_locks.prepend(&held_lock.node);
-            }
+            std.debug.print("{}: Immediately got {} lock on {}\n", .{ me, mode, id });
+            self.grant(l, id, mode, me);
             return;
         } else {
-            l.waiting_modes.setPresent(mode, true);
-            const new_holder = self.holder_pool.create(undefined) catch unreachable;
-            new_holder.* = .{
-                .thread = me,
-                .mode = mode,
-            };
-            l.waiting_list.prepend(&new_holder.node);
+            {
+                const waiting = self.waiting_pool.create(undefined) catch unreachable;
+                waiting.* = .{
+                    .thread = me,
+                    .mode = mode,
+                };
+                l.waiting_list.prepend(&waiting.node);
+            }
 
             {
                 const ti = self.threads.getOrPutAssumeCapacity(me);
@@ -201,6 +228,7 @@ pub const Manager = struct {
                 ti.value_ptr.waiting_lock = id;
             }
 
+            std.debug.print("{}: Waiting for {} lock on {}\n", .{ me, mode, id });
             while (true) {
                 try l.condition.wait(self.io, &self.mutex);
                 const ti = self.threads.get(me).?;
@@ -209,14 +237,13 @@ pub const Manager = struct {
             }
 
             {
-                const my_holder = Lock.Holder.findInList(l.waiting_list, me).?;
-                l.waiting_list.remove(&my_holder.node);
-                l.granted_list.prepend(&my_holder.node);
-
-                l.granted_modes.setPresent(my_holder.mode, true);
-                rebuildWaitingSet(l);
+                const waiting = l.findWaiting(me).?;
+                l.waiting_list.remove(&waiting.node);
             }
 
+            std.debug.assert(canGrant(l, mode, me));
+            std.debug.print("{}: Got {} lock on {}\n", .{ me, mode, id });
+            self.grant(l, id, mode, me);
             return;
         }
     }
@@ -225,44 +252,44 @@ pub const Manager = struct {
         try self.mutex.lock(self.io);
         defer self.mutex.unlock(self.io);
 
-        const ti = self.threads.get(me);
+        const ti = self.threads.getPtr(me);
         if (ti == null) return;
         std.debug.assert(ti.?.waiting_lock == null);
 
-        var held_lock = ti.?.held_locks.first;
-        while (held_lock) |n| {
-            held_lock = n.next;
-            const hl: *ThreadInfo.HeldLock = @fieldParentPtr("node", n);
+        var tl_node = ti.?.granted_locks.first;
+        while (tl_node) |n| {
+            tl_node = n.next;
+            const tl: *ThreadLock = @fieldParentPtr("per_thread_node", n);
+            std.debug.print("{}: Starting to unlock {}\n", .{ me, tl.lock });
 
-            const l = self.locks.get(hl.lock).?;
-            var next_holder = l.granted_list.first;
-            while (next_holder) |hn| {
-                next_holder = hn.next;
-                const h: *Lock.Holder = @fieldParentPtr("node", hn);
-                if (h.thread == me) {
-                    l.granted_list.remove(&h.node);
-                    self.holder_pool.destroy(h);
-                }
-            }
+            const l = self.locks.get(tl.lock).?;
+
+            ti.?.granted_locks.remove(&tl.per_thread_node);
+            l.granted_list.remove(&tl.per_lock_node);
 
             rebuildGrantedSet(l);
 
             if (l.waiting_list.last) |candidate_node| {
-                const candidate: *Lock.Holder = @fieldParentPtr("node", candidate_node);
+                const candidate: *Waiting = @fieldParentPtr("node", candidate_node);
                 if (canGrant(l, candidate.mode, candidate.thread)) {
+                    std.debug.print("{}: Waking up {}\n", .{ me, candidate.thread });
                     self.threads.getPtr(candidate.thread).?.waiting_lock = null;
                     l.condition.broadcast(self.io);
                 }
             }
 
             if (l.granted_list.first == null and l.waiting_list.first == null) {
-                _ = self.locks.swapRemove(hl.lock);
+                std.debug.print("{}: Removed lock {}\n", .{ me, tl.lock });
+                _ = self.locks.swapRemove(tl.lock);
                 self.lock_pool.destroy(l);
             }
 
-            self.held_lock_pool.destroy(hl);
+            std.debug.print("{}: Done unlocking {}\n", .{ me, tl.lock });
+
+            self.thread_lock_pool.destroy(tl);
         }
 
         _ = self.threads.swapRemove(me);
+        std.debug.print("{}: Done unlocking\n", .{me});
     }
 };

@@ -61,7 +61,7 @@ pub fn loop(self: *Server) !void {
 }
 
 fn handleMessage(self: *Server, m: common.network.Message) !bool {
-    std.debug.print("Got {}\n", .{m});
+    // std.debug.print("Got {}\n", .{m});
     switch (m) {
         .query => |q| {
             const sender = common.network.Message.Sender{

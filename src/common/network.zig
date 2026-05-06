@@ -120,7 +120,7 @@ pub const Message = union(Tag) {
         writer: *std.Io.Writer,
 
         pub fn send(self: Sender, msg: Message) !void {
-            std.debug.print("Sent {}\n", .{msg});
+            // std.debug.print("Sent {}\n", .{msg});
             try msg.write(self.writer);
             try self.writer.flush();
         }
