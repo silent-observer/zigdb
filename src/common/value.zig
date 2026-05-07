@@ -59,6 +59,22 @@ pub const Value = union(enum) {
             .bool => |b| try writer.print("{}", .{b}),
         }
     }
+
+    // Calculate the width it would require to print this as text
+    pub fn calcTextWidth(self: Value) usize {
+        switch (self) {
+            .int => |x| {
+                return if (x == 0)
+                    1
+                else if (x > 0)
+                    1 + std.math.log10_int(@as(u64, @intCast(x)))
+                else
+                    2 + std.math.log10_int(@as(u64, @intCast(-x)));
+            },
+            .text => |s| return s.len,
+            .bool => return 1,
+        }
+    }
 };
 
 /// Value together with its type.

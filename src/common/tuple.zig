@@ -215,6 +215,19 @@ pub const MemTuple = struct {
         return .{ .ptr = @ptrCast(bytes) };
     }
 
+    /// Clones the tuple into a new allocator.
+    /// Ensures correct alignment.
+    pub fn clone(self: MemTuple, alloc: std.mem.Allocator) MemTuple {
+        const s = self.size();
+        const bytes = alloc.alignedAlloc(
+            u8,
+            std.mem.Alignment.fromByteUnits(@alignOf(MemTuple.Data)),
+            s,
+        ) catch oom();
+        @memcpy(bytes, @as([*]u8, @ptrCast(self.ptr)));
+        return .{ .ptr = @ptrCast(bytes) };
+    }
+
     /// Get i-th attribute with a comptime-known type T.
     pub fn get(self: MemTuple, T: type, i: usize) T {
         const data: []const u8 = self.dataPtr(i);

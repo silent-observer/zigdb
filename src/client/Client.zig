@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const common = @import("common");
+const Table = @import("Table.zig");
 
 const Client = @This();
 
@@ -9,8 +10,6 @@ const Client = @This();
 gpa: std.mem.Allocator,
 /// Arena allocator that lives only for the lifetime of one message.
 arena: std.heap.ArenaAllocator,
-/// Arena allocator for tuple descriptors, lives between TupleDescriptor messages.
-descriptor_arena: std.heap.ArenaAllocator,
 
 network_in_buffer: []u8,
 network_out_buffer: []u8,
@@ -22,8 +21,8 @@ stdin_reader: std.Io.File.Reader,
 /// Helper buffer for reading one line at a time
 line_buffer: std.Io.Writer.Allocating,
 
-/// Last TupleDescriptor received from server
-last_descriptor: ?*common.TupleDescriptor,
+/// Data for the table that is currently being assembled
+table: Table,
 
 /// Initialize a new client
 pub fn init(io: std.Io, gpa: std.mem.Allocator, stream: std.Io.net.Stream) Client {
@@ -34,7 +33,7 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, stream: std.Io.net.Stream) Clien
     return Client{
         .gpa = gpa,
         .arena = .init(gpa),
-        .descriptor_arena = .init(gpa),
+        .table = .init(gpa),
 
         .network_in_buffer = network_in_buffer,
         .network_out_buffer = network_out_buffer,
@@ -44,15 +43,13 @@ pub fn init(io: std.Io, gpa: std.mem.Allocator, stream: std.Io.net.Stream) Clien
         .network_writer = stream.writer(io, network_out_buffer),
         .stdin_reader = std.Io.File.stdin().readerStreaming(io, stdin_buffer),
         .line_buffer = std.Io.Writer.Allocating.init(gpa),
-
-        .last_descriptor = null,
     };
 }
 
 /// Deinitialize the client
 pub fn deinit(self: *Client) void {
     self.arena.deinit();
-    self.descriptor_arena.deinit();
+    self.table.arena.deinit();
     self.gpa.free(self.network_in_buffer);
     self.gpa.free(self.network_out_buffer);
     self.gpa.free(self.stdin_buffer);
@@ -82,7 +79,9 @@ pub fn loop(self: *Client) !void {
 fn handleMessage(self: *Client, m: common.network.Message) !bool {
     switch (m) {
         .err => std.debug.print("Error!\n", .{}),
-        .success => {},
+        .success => if (self.table.descr != null) {
+            std.debug.print("{f}", .{self.table});
+        },
         // Received a log message from server
         .log => |l| std.debug.print("{s}\n", .{l}),
         // Ready to send a new query
@@ -113,18 +112,14 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
         // Received a tuple descriptor for the next set of rows
         .tuple_descriptor => |td| {
             // Delete the previous one first
-            _ = self.descriptor_arena.reset(.retain_capacity);
-            self.last_descriptor =
-                self.descriptor_arena.allocator()
-                    .create(common.TupleDescriptor) catch common.oom();
-            self.last_descriptor.?.* = td.clone(self.descriptor_arena.allocator());
+            self.table.reset();
+            self.table.descr = td.clone(self.table.arena.allocator());
         },
         // Received a new tuple
         .tuple => |tuple| {
             // We have to initialize the tuple descriptor!
-            tuple.ptr.h.descr = self.last_descriptor.?;
-
-            std.debug.print("{f}\n", .{tuple});
+            tuple.ptr.h.descr = &self.table.descr.?;
+            self.table.append(tuple.clone(self.table.arena.allocator()));
         },
         .query, .exit => unreachable,
     }
