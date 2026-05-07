@@ -11,6 +11,7 @@ const transaction = @import("transaction.zig");
 const planner = @import("planner.zig");
 const lock = @import("lock.zig");
 const Executor = @import("executor/Executor.zig");
+const VariablesCache = @import("VariablesCache.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");
@@ -42,10 +43,12 @@ pub const Shared = struct {
     transaction_log: *transaction.Log,
     /// Manager for various locks
     lock_manager: *lock.Manager,
+    /// Cache of various global variables
+    variables_cache: *VariablesCache,
 };
 
 /// Execute a single statement
-pub fn execute_stmt(
+pub fn executeStmt(
     s: *Session,
     query: []const u8,
     sender: common.network.Message.Sender,
@@ -173,6 +176,9 @@ pub fn execute_stmt(
             // Unlock all locks
             try s.shared.lock_manager.unlockAll(s.thread_id);
         }
+
+        // Flush data to disk if we can
+        try s.shared.storage_cache.flush(false);
 
         // Send the success message
         try sender.send(.success);

@@ -23,17 +23,9 @@
 //!     attr_name   TEXT,   -- attribute name
 //!     PRIMARY KEY (attr_rel_id, attr_id)
 //! );
-//! -- Sequences
-//! CREATE TABLE zdb_rels (
-//!     seq_id      UINT4 PRIMARY KEY,  -- sequence id
-//!     seq_name    TEXT,               -- sequence name
-//!     seq_val     UINT4               -- current value of the sequence
-//! );
 //! ```
 //!
 //! All the catalog tables are self-described in zdb_rels and zdb_attrs tables.
-//! There are also default sequences named seq_table_id and seq_seq_id, used for
-//! choosing ids for user-created tables and sequences.
 //! All user ids start at 1000.
 
 const std = @import("std");
@@ -46,7 +38,6 @@ const oom = common.oom;
 pub const TableId = enum(common.ids.TableId) {
     zdb_rels = 1,
     zdb_attrs = 2,
-    zdb_seqs = 3,
 };
 
 /// Enum used to refer to specific system attributes.
@@ -60,16 +51,6 @@ pub const SystemAttribute = enum {
     attr_id,
     attr_type,
     attr_name,
-    // zdb_seq
-    seq_id,
-    seq_name,
-    seq_val,
-};
-
-/// Fixed sequence ids of catalog sequences.
-pub const SequenceId = enum(common.ids.TableId) {
-    zdb_seq_table_id = 0,
-    zdb_seq_seq_id = 1,
 };
 
 /// Internal entry for each catalog attribute.
@@ -126,26 +107,6 @@ const Tables: []const TableEntry = &.{
                 .id = .attr_name,
                 .db_type = .text,
                 .t = []const u8,
-            },
-        },
-    },
-    TableEntry{
-        .id = .zdb_seqs,
-        .attrs = &.{
-            AttributeEntry{
-                .id = .seq_id,
-                .db_type = .oid,
-                .t = u32,
-            },
-            AttributeEntry{
-                .id = .seq_name,
-                .db_type = .text,
-                .t = []const u8,
-            },
-            AttributeEntry{
-                .id = .seq_val,
-                .db_type = .uint4,
-                .t = u32,
             },
         },
     },

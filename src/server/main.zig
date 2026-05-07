@@ -58,6 +58,8 @@ pub fn main(init: std.process.Init) !void {
     defer storage_cache.deinit(); // Don't forget to deinitialize
     defer storage_cache.flush(true) catch {};
 
+    var variables_cache = try zigdb.VariablesCache.init(&storage_cache);
+
     {
         // Initialize and rebuild the catalog cache
         var catalog_cache = zigdb.catalog.Cache.init(init.gpa, 1, &storage_cache);
@@ -67,7 +69,11 @@ pub fn main(init: std.process.Init) !void {
         try catalog_cache.build();
     }
 
-    var transaction_log = zigdb.transaction.Log.init(&storage_cache, init.gpa);
+    var transaction_log = zigdb.transaction.Log.init(
+        &storage_cache,
+        &variables_cache,
+        init.gpa,
+    );
     defer transaction_log.deinit(init.gpa);
 
     var lock_manager = zigdb.lock.Manager.init(init.io, init.gpa);
@@ -77,6 +83,7 @@ pub fn main(init: std.process.Init) !void {
         .storage_cache = &storage_cache,
         .transaction_log = &transaction_log,
         .lock_manager = &lock_manager,
+        .variables_cache = &variables_cache,
     };
 
     //try catalog_cache.rebuild();

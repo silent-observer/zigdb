@@ -22,6 +22,7 @@ pub const TLogFileId = u32;
 pub const FullFileId = union(enum) {
     heap: FullTableId,
     tlog: TLogFileId,
+    vars: void,
 };
 
 /// Id of page inside a data file

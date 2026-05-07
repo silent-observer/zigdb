@@ -31,7 +31,7 @@ pub fn create(
 ) !Snapshot {
     // xmax has to be captured before the list of transactions, to avoid
     // possibly missing some new transactions started between the two statements.
-    const xmax = log.peekNext();
+    const xmax = log.variables_cache.peekTransactionId();
     const active_transactions = try log.getActiveTransactions(alloc);
 
     var xmin = xmax;

@@ -11,6 +11,7 @@ const Executor = @import("executor/Executor.zig");
 pub const Server = @import("Server.zig");
 pub const Session = @import("Session.zig");
 pub const lock = @import("lock.zig");
+pub const VariablesCache = @import("VariablesCache.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");

@@ -82,7 +82,7 @@ fn handleMessage(self: *Server, m: common.network.Message) !bool {
                 .writer = &self.network_writer.interface,
             };
 
-            try self.session.execute_stmt(q, sender);
+            try self.session.executeStmt(q, sender);
             try sender.send(.ready);
         },
         // Time to close the connection

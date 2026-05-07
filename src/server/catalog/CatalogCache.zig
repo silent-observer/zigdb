@@ -32,7 +32,6 @@ descr: std.array_hash_map.Auto(ids.TableId, TupleDescriptor),
 pub const CatalogTables = struct {
     zdb_rels: Table(tables.TableId.zdb_rels),
     zdb_attrs: Table(tables.TableId.zdb_attrs),
-    zdb_seqs: Table(tables.TableId.zdb_seqs),
 };
 
 // Ideally, the CatalogTables type above should also be auto-generated, but
@@ -461,41 +460,6 @@ pub fn Table(comptime id: tables.TableId) type {
     };
 }
 
-/// A representation of a sequence stored in the catalog
-pub const Sequence = struct {
-    id: tables.SequenceId,
-    cat: *CatalogCache,
-    cache: *storage.Cache,
-
-    /// Initialize the sequence
-    pub fn init(id: tables.SequenceId, cat: *CatalogCache, cache: *storage.Cache) Sequence {
-        return .{
-            .id = id,
-            .cat = cat,
-            .cache = cache,
-        };
-    }
-
-    /// Get the next number from the sequence
-    pub fn next(self: Sequence, tid: ids.RealTransactionId) !u32 {
-        // Find sequence in the catalog
-        var seq_scanner = self.cat.catalog.zdb_seqs.scan(
-            &.{.seq_id},
-            &.{@intFromEnum(self.id)},
-        );
-        // Get its row
-        var seq_row = seq_scanner.next() orelse return Error.CatalogCorrupted;
-        // Fetch the next table id from the sequence
-        const result = seq_row.seq_val;
-
-        // Increment the sequence and update the catalog
-        seq_row.seq_val += 1;
-        try seq_scanner.updateLast(self.cache, seq_row, tid);
-
-        return result;
-    }
-};
-
 /// Create a new heap table without initializing the cache first.
 fn createRaw(
     cache: *storage.Cache,
@@ -514,7 +478,6 @@ pub fn build(self: *CatalogCache) !void {
     // Create the catalog tables
     try createRaw(self.storage_cache, self.db_id, .zdb_rels);
     try createRaw(self.storage_cache, self.db_id, .zdb_attrs);
-    try createRaw(self.storage_cache, self.db_id, .zdb_seqs);
 
     // Go through all the tables and fill zdb_rels
     for (std.enums.values(tables.TableId)) |id| {
@@ -537,18 +500,6 @@ pub fn build(self: *CatalogCache) !void {
             }, .frozen);
         }
     }
-
-    // Create the default sequences and fill zdb_seqs
-    try self.catalog.zdb_seqs.add(self.storage_cache, .{
-        .seq_id = @intFromEnum(tables.SequenceId.zdb_seq_table_id),
-        .seq_name = "zdb_seq_table_id",
-        .seq_val = 1000,
-    }, .frozen);
-    try self.catalog.zdb_seqs.add(self.storage_cache, .{
-        .seq_id = @intFromEnum(tables.SequenceId.zdb_seq_seq_id),
-        .seq_name = "zdb_seq_seq_id",
-        .seq_val = 1000,
-    }, .frozen);
 
     try self.updateDescriptors();
 }

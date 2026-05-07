@@ -6,14 +6,14 @@ const std = @import("std");
 const common = @import("common");
 const storage = @import("../storage.zig");
 const transaction = @import("transaction.zig");
+const VariablesCache = @import("../VariablesCache.zig");
 const ids = common.ids;
 const oom = common.oom;
 
 const TransactionLog = @This();
 
-/// The id of the next transaction
-next_tid: std.atomic.Value(u32),
 storage_cache: *storage.Cache,
+variables_cache: *VariablesCache,
 
 /// List of all currently active transactions in a sorted order
 active_transactions: std.ArrayList(ids.RealTransactionId),
@@ -37,12 +37,16 @@ const Address = struct {
 };
 
 /// Initialize the transaction log
-pub fn init(storage_cache: *storage.Cache, gpa: std.mem.Allocator) TransactionLog {
+pub fn init(
+    storage_cache: *storage.Cache,
+    variables_cache: *VariablesCache,
+    gpa: std.mem.Allocator,
+) TransactionLog {
     const active_transactions = std.ArrayList(ids.RealTransactionId)
         .initCapacity(gpa, max_active_transactions) catch oom();
     return .{
-        .next_tid = .init(ids.RealTransactionId.start.v),
         .storage_cache = storage_cache,
+        .variables_cache = variables_cache,
         .active_transactions = active_transactions,
     };
 }
@@ -100,23 +104,13 @@ pub fn set(self: *TransactionLog, tid: transaction.Id, status: transaction.Statu
     }
 }
 
-/// What the id ID for the next transaction is going to be?
-pub fn peekNext(self: *TransactionLog) ids.RealTransactionId {
-    return .{ .v = self.next_tid.load(.acquire) };
-}
-
-/// Generate a new ID for a transaction.
-pub fn next(self: *TransactionLog) ids.RealTransactionId {
-    return .{ .v = self.next_tid.fetchAdd(1, .acq_rel) };
-}
-
 /// Get a real transaction instead of a virtual one, if we didn't have one already.
 pub fn startRealTransaction(self: *TransactionLog, out: *transaction.Id) !void {
     switch (out.*) {
         .real => {},
         .virtual => {
             // Get the new transaction id
-            const tid = self.next();
+            const tid = try self.variables_cache.nextTransactionId();
             out.* = .{ .real = tid };
             // Take the lock
             try self.lock.lock(self.storage_cache.io);

@@ -40,6 +40,7 @@ pub fn open(io: Io, base_path: []const u8, id: Id) !RawDataFile {
             .{table.db},
         ) catch unreachable,
         .tlog => "tlog",
+        .vars => ".",
     };
     const dir = try base_dir.createDirPathOpen(io, dir_path, .{});
 
@@ -54,6 +55,7 @@ pub fn open(io: Io, base_path: []const u8, id: Id) !RawDataFile {
             "{}.tlog",
             .{tlog},
         ) catch unreachable,
+        .vars => "vars",
     };
     const f = try dir.createFile(
         io,

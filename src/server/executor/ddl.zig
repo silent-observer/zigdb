@@ -27,12 +27,8 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void
         .write,
         cxt.s.thread_id,
     );
-    // Fetch the next table id from the sequence
-    const table_id: ids.TableId = try catalog.Sequence.init(
-        .zdb_seq_table_id,
-        cxt.s.catalog_cache,
-        cxt.s.shared.storage_cache,
-    ).next(cxt.s.current_tid.real);
+    // Generate the next table id
+    const table_id: ids.TableId = try cxt.s.shared.variables_cache.nextObjectId();
 
     // Add a row to zdb_rels catalog table
     try cxt.s.catalog_cache.catalog.zdb_rels.add(

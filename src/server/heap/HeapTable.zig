@@ -6,9 +6,8 @@
 
 const std = @import("std");
 
-const RawDataFile = @import("../storage/RawDataFile.zig");
-const Page = RawDataFile.Page;
 const storage = @import("../storage.zig");
+const Page = storage.Page;
 const HeapPage = @import("HeapPage.zig");
 const common = @import("common");
 const MemTuple = common.MemTuple;
