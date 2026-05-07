@@ -86,6 +86,8 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
         .log => |l| std.debug.print("{s}\n", .{l}),
         // Ready to send a new query
         .ready => {
+            // Delete the last table we got
+            self.table.reset();
             // Print prompt
             std.debug.print("> ", .{});
             // Read one line from stdin to line writer
@@ -111,8 +113,6 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
         },
         // Received a tuple descriptor for the next set of rows
         .tuple_descriptor => |td| {
-            // Delete the previous one first
-            self.table.reset();
             self.table.descr = td.clone(self.table.arena.allocator());
         },
         // Received a new tuple
