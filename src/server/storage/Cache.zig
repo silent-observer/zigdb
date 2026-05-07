@@ -45,8 +45,10 @@ io: std.Io,
 base_path: []const u8,
 // Hash map of currently open files
 files: std.array_hash_map.Auto(ids.FullFileId, RawDataFile),
-// Hash map of pages (the actual cache data)
-pages: std.array_hash_map.Auto(ids.FullPageId, RawDataFile.Page.Data),
+// Memory pool for pages (the actual cache data)
+page_pool: std.heap.MemoryPool(RawDataFile.Page.Data),
+// Hash map of pages
+pages: std.array_hash_map.Auto(ids.FullPageId, *RawDataFile.Page.Data),
 // Hash map of page statuses
 page_status: std.array_hash_map.Auto(ids.FullPageId, PageStatus),
 
@@ -57,9 +59,10 @@ pub fn init(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
         .gpa = gpa,
         .io = io,
         .base_path = base_path,
-        .files = std.array_hash_map.Auto(ids.FullFileId, RawDataFile).init(gpa, &.{}, &.{}) catch oom(),
-        .pages = std.array_hash_map.Auto(ids.FullPageId, RawDataFile.Page.Data).init(gpa, &.{}, &.{}) catch oom(),
-        .page_status = std.array_hash_map.Auto(ids.FullPageId, PageStatus).init(gpa, &.{}, &.{}) catch oom(),
+        .files = .empty,
+        .page_pool = .empty,
+        .pages = .empty,
+        .page_status = .empty,
     };
 }
 
@@ -69,6 +72,7 @@ pub fn deinit(self: *Cache) void {
     for (self.files.values()) |f| {
         f.close();
     }
+    self.page_pool.deinit(self.gpa);
     self.files.deinit(self.gpa);
     self.pages.deinit(self.gpa);
     self.page_status.deinit(self.gpa);
@@ -128,13 +132,14 @@ fn fetch(
     // Remove the entry if anything goes wrong
     errdefer _ = self.pages.swapRemove(id);
     if (!page.found_existing) {
+        page.value_ptr.* = self.page_pool.create(self.gpa) catch oom();
         // Read the page data if it wasn't in the cache
-        try rdf.read(id.page, page.value_ptr);
+        try rdf.read(id.page, page.value_ptr.*);
     }
 
     // Form the PinnedPage to return
     return .{
-        .page = page.value_ptr,
+        .page = page.value_ptr.*,
         .id = id,
         .writeable = writeable,
     };
@@ -199,7 +204,7 @@ pub fn flush(self: *Cache, force: bool) !void {
             if (!force and e.value_ptr.write_lock.state.load(.acquire) != .unlocked)
                 continue;
             const file = self.files.get(e.key_ptr.file) orelse unreachable;
-            const data = self.pages.getPtr(e.key_ptr.*) orelse unreachable;
+            const data = self.pages.get(e.key_ptr.*) orelse unreachable;
             try file.write(e.key_ptr.page, data);
             e.value_ptr.dirty = false;
         }
