@@ -60,7 +60,7 @@ pub const Value = union(enum) {
         }
     }
 
-    // Calculate the width it would require to print this as text
+    /// Calculate the width it would require to print this as text
     pub fn calcTextWidth(self: Value) usize {
         switch (self) {
             .int => |x| {

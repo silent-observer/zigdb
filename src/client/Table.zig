@@ -1,12 +1,18 @@
+//! Representation of a table with data that we received from server
+
 const std = @import("std");
 const common = @import("common");
 
 const Table = @This();
 
+/// Arena used to allocate all the data.
 arena: std.heap.ArenaAllocator,
+/// Tuple descriptor. Might be empty if we don't have it yet.
 descr: ?common.TupleDescriptor,
+/// List of tuples in the table
 tuples: std.ArrayList(common.MemTuple),
 
+/// Create a new empty table.
 pub fn init(gpa: std.mem.Allocator) Table {
     return .{
         .arena = .init(gpa),
@@ -15,17 +21,19 @@ pub fn init(gpa: std.mem.Allocator) Table {
     };
 }
 
+/// Reset the table before filling it.
 pub fn reset(self: *Table) void {
     _ = self.arena.reset(.retain_capacity);
     self.descr = null;
     self.tuples = .empty;
 }
 
+/// Add a new tuple to the table.
 pub fn append(self: *Table, t: common.MemTuple) void {
     self.tuples.append(self.arena.allocator(), t) catch common.oom();
 }
 
-/// Format the Table
+/// Format the table.
 pub fn format(
     self: Table,
     writer: *std.Io.Writer,
@@ -95,7 +103,7 @@ pub fn format(
     try writer.print("({} rows)\n\n", .{self.tuples.items.len});
 }
 
-/// Format the Table as a JSON array.
+/// Format the table as a JSON object.
 pub fn jsonStringify(self: Table, jws: anytype) !void {
     try jws.beginObject();
     {

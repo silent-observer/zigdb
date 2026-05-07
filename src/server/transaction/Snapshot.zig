@@ -34,6 +34,7 @@ pub fn create(
     const xmax = log.variables_cache.peekTransactionId();
     const active_transactions = try log.getActiveTransactions(alloc);
 
+    // Find the earliest active transaction
     var xmin = xmax;
     for (active_transactions) |tid|
         xmin.v = @min(xmin.v, tid.v);

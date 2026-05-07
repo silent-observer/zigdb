@@ -158,6 +158,8 @@ pub fn endTransaction(self: *TransactionLog, tid: transaction.Id, status: transa
     }
 }
 
+/// Get a list of all currently active transactions.
+/// Allocates a new copy of it with the given allocator.
 pub fn getActiveTransactions(self: *TransactionLog, alloc: std.mem.Allocator) ![]ids.RealTransactionId {
     try self.lock.lockShared(self.storage_cache.io);
     defer self.lock.unlockShared(self.storage_cache.io);
