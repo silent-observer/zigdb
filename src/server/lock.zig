@@ -210,12 +210,25 @@ pub const Manager = struct {
     }
 
     /// Can we grant a lock with this specific mode?
-    fn canGrant(l: *const Lock, mode: Mode, me: std.Thread.Id) bool {
+    /// additional_granted_modes are modes that will be considered already
+    /// granted for this calculation, even though they aren't granted yet.
+    fn canGrant(
+        l: *const Lock,
+        mode: Mode,
+        me: std.Thread.Id,
+        additional_granted_modes: Mode.Set,
+    ) bool {
+        const effective_granted_modes =
+            l.granted_modes.unionWith(additional_granted_modes);
         // Set of modes the target mode can conflict with
         const possible_conflicts = Mode.conflicts.get(mode);
-        if (possible_conflicts.intersectWith(l.granted_modes).eql(.empty)) {
+        if (possible_conflicts.intersectWith(effective_granted_modes).eql(.empty)) {
             // Nothing conflicts, we can grant this!
             return true;
+        } else if (!possible_conflicts.intersectWith(additional_granted_modes).eql(.empty)) {
+            // This mode conflicts with our additional granted modes.
+            // Assuming the additional locks come from other threads, we cannot grant this.
+            return false;
         }
 
         // Something conflicts, but maybe it's our own lock?
@@ -293,7 +306,7 @@ pub const Manager = struct {
         const l = r.value_ptr.*;
 
         // Can we immediately grant this lock without waiting?
-        if (canGrant(l, mode, me)) {
+        if (canGrant(l, mode, me, .empty)) {
             std.debug.print("{}: Immediately got {} lock on {}\n", .{ me, mode, id });
             self.grant(l, id, mode, me);
             return;
@@ -327,8 +340,8 @@ pub const Manager = struct {
                 // However, we *can* rely on the Lock structure itself
                 // being at the same memory location, since it's in the pool.
                 try l.condition.wait(self.io, &self.mutex);
-                // We woke up, but only one waiting thread gets the lock.
-                // We have to check if it's us.
+                // We woke up, but only some waiting threads get the lock.
+                // We have to check if we got it or not.
                 const ti = self.threads.get(me).?;
                 // The unlock() method sets waiting_lock to null for all
                 // threads that can be granted a lock.
@@ -342,7 +355,7 @@ pub const Manager = struct {
                 l.waiting_list.remove(&waiting.node);
             }
 
-            std.debug.assert(canGrant(l, mode, me));
+            std.debug.assert(canGrant(l, mode, me, .empty));
             std.debug.print("{}: Got {} lock on {}\n", .{ me, mode, id });
             self.grant(l, id, mode, me);
             return;
@@ -378,17 +391,29 @@ pub const Manager = struct {
             // We have to rebuild the granted modes set of the lock after this
             rebuildGrantedSet(l);
 
-            // Is anyone waiting for this lock?
-            if (l.waiting_list.last) |candidate_node| {
+            // Go through the wait queue, starting from threads that have waited
+            // for the longest
+            var waiting_node = l.waiting_list.last;
+            var found_anyone = false;
+            // Modes we already decided to grant
+            var additional_granted_modes: Mode.Set = .empty;
+            while (waiting_node) |candidate_node| {
+                waiting_node = candidate_node.prev;
                 const candidate: *Waiting = @fieldParentPtr("node", candidate_node);
                 // Can we grant them this lock?
-                if (canGrant(l, candidate.mode, candidate.thread)) {
-                    // We can, mark them as finished waiting and wake everyone up.
+                if (canGrant(l, candidate.mode, candidate.thread, additional_granted_modes)) {
+                    // We can, mark them as finished waiting
                     std.debug.print("{}: Waking up {}\n", .{ me, candidate.thread });
                     self.threads.getPtr(candidate.thread).?.waiting_lock = null;
-                    l.condition.broadcast(self.io);
+                    // Also add this mode to the potential granted set, to ensure
+                    // next candidates don't conflict with this mode.
+                    additional_granted_modes.setPresent(candidate.mode, true);
+                    found_anyone = true;
                 }
             }
+            // Wake everyone up if we found candidates
+            if (found_anyone)
+                l.condition.broadcast(self.io);
 
             // Is there no one who needs this Lock anymore?
             if (l.granted_list.first == null and l.waiting_list.first == null) {
