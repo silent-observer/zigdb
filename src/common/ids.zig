@@ -44,13 +44,21 @@ pub const FullPageId = struct {
     page: PageId,
 };
 
-pub const RealTransactionId = enum(u32) {
-    invalid = 0,
-    frozen = 1,
-    start = 32,
-    _,
+pub const RealTransactionId = packed struct(u32) {
+    v: u32,
+
+    pub const invalid: RealTransactionId = .{ .v = 0 };
+    pub const frozen: RealTransactionId = .{ .v = 1 };
+    pub const start: RealTransactionId = .{ .v = 32 };
 
     pub fn next(self: RealTransactionId) RealTransactionId {
-        return @enumFromInt(@intFromEnum(self) + 1);
+        return .{ .v = self.v + 1 };
+    }
+
+    pub fn isInvalid(self: RealTransactionId) bool {
+        return self.v == invalid.v;
+    }
+    pub fn isFrozen(self: RealTransactionId) bool {
+        return self.v == frozen.v;
     }
 };

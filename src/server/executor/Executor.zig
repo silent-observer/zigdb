@@ -65,7 +65,7 @@ fn executeBegin(cxt: *Context) !void {
         try cxt.sender.log(cxt.alloc, "ERROR: already in transaction", .{});
         return Error.ExecutionError;
     }
-    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     cxt.s.explicit_transaction = .active;
 }
 
@@ -84,7 +84,7 @@ fn executeCommit(cxt: *Context) !void {
         },
     }
 
-    try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .committed);
+    try cxt.s.shared.transaction_log.endTransaction(cxt.s.current_tid, .committed);
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
     try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
@@ -101,7 +101,7 @@ fn executeRollback(cxt: *Context) !void {
         },
     }
 
-    try cxt.s.shared.transaction_log.set(cxt.s.current_tid, .aborted);
+    try cxt.s.shared.transaction_log.endTransaction(cxt.s.current_tid, .aborted);
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
     try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);

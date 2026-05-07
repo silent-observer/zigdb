@@ -13,7 +13,7 @@ const oom = common.oom;
 /// Execute INSERT statement
 pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
     // We need a real transaction to write data
-    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
     try cxt.s.shared.lock_manager.lock(
         .{ .table = .{
@@ -44,7 +44,7 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
 /// Execute DELETE statement
 pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
     // We need a real transaction to write data
-    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
     try cxt.s.shared.lock_manager.lock(
         .{ .table = .{
@@ -75,7 +75,7 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
 /// Execute UPDATE statement
 pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
     // We need a real transaction to write data
-    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
     try cxt.s.shared.lock_manager.lock(
         .{ .table = .{

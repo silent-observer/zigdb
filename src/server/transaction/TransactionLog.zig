@@ -15,12 +15,19 @@ const TransactionLog = @This();
 next_tid: std.atomic.Value(u32),
 storage_cache: *storage.Cache,
 
+/// List of all currently active transactions in a sorted order
+active_transactions: std.ArrayList(ids.RealTransactionId),
+/// Lock for accessing it
+lock: std.Io.RwLock = .init,
+
 /// Each transaction status is 2 bits, so we can fit 4 of them in one byte.
 const status_count_per_byte = 4;
 /// We can fit a lot more in a whole page.
 const status_count_per_page = storage.Page.Size * status_count_per_byte;
 /// We split the log into small-ish files to allow eventual cleanup of outdated files.
 const max_pages_per_file = 1024;
+/// Limit of concurrent transactions
+pub const max_active_transactions = 1024;
 
 /// A full "address" of a transaction in the log
 const Address = struct {
@@ -30,18 +37,26 @@ const Address = struct {
 };
 
 /// Initialize the transaction log
-pub fn init(storage_cache: *storage.Cache) TransactionLog {
+pub fn init(storage_cache: *storage.Cache, gpa: std.mem.Allocator) TransactionLog {
+    const active_transactions = std.ArrayList(ids.RealTransactionId)
+        .initCapacity(gpa, max_active_transactions) catch oom();
     return .{
-        .next_tid = .init(@intFromEnum(ids.RealTransactionId.start)),
+        .next_tid = .init(ids.RealTransactionId.start.v),
         .storage_cache = storage_cache,
+        .active_transactions = active_transactions,
     };
+}
+
+/// Deinitialize the transaction log
+pub fn deinit(log: *TransactionLog, gpa: std.mem.Allocator) void {
+    log.active_transactions.deinit(gpa);
 }
 
 /// Calculate the address from transaction ID.
 fn split(tid: ids.RealTransactionId) Address {
-    const file_id = @intFromEnum(tid) / (max_pages_per_file * status_count_per_page);
-    const page_id = (@intFromEnum(tid) / status_count_per_page) % max_pages_per_file;
-    const index = @intFromEnum(tid) % status_count_per_page;
+    const file_id = tid.v / (max_pages_per_file * status_count_per_page);
+    const page_id = (tid.v / status_count_per_page) % max_pages_per_file;
+    const index = tid.v % status_count_per_page;
     const byte_index = index / status_count_per_byte;
     const bit_shift = (index % status_count_per_byte) * 2;
     return .{
@@ -87,18 +102,74 @@ pub fn set(self: *TransactionLog, tid: transaction.Id, status: transaction.Statu
 
 /// What the id ID for the next transaction is going to be?
 pub fn peekNext(self: *TransactionLog) ids.RealTransactionId {
-    return @enumFromInt(self.next_tid.load(.acquire));
+    return .{ .v = self.next_tid.load(.acquire) };
 }
 
 /// Generate a new ID for a transaction.
 pub fn next(self: *TransactionLog) ids.RealTransactionId {
-    return @enumFromInt(self.next_tid.fetchAdd(1, .acq_rel));
+    return .{ .v = self.next_tid.fetchAdd(1, .acq_rel) };
 }
 
-/// Get a real transaction isntead of a virtual one, if we didn't have one already.
-pub fn startRealTransaction(self: *TransactionLog, out: *transaction.Id) void {
+/// Get a real transaction instead of a virtual one, if we didn't have one already.
+pub fn startRealTransaction(self: *TransactionLog, out: *transaction.Id) !void {
     switch (out.*) {
         .real => {},
-        .virtual => out.* = .{ .real = self.next() },
+        .virtual => {
+            // Get the new transaction id
+            const tid = self.next();
+            out.* = .{ .real = tid };
+            // Take the lock
+            try self.lock.lock(self.storage_cache.io);
+            defer self.lock.unlock(self.storage_cache.io);
+            // Register as an active transaction
+            const index = std.sort.lowerBound(
+                ids.RealTransactionId,
+                self.active_transactions.items,
+                tid,
+                struct {
+                    fn order(a: ids.RealTransactionId, b: ids.RealTransactionId) std.math.Order {
+                        return std.math.order(a.v, b.v);
+                    }
+                }.order,
+            );
+            self.active_transactions.insertBounded(index, tid) catch oom();
+        },
     }
+}
+
+/// Clean up a transaction
+pub fn endTransaction(self: *TransactionLog, tid: transaction.Id, status: transaction.Status) !void {
+    switch (tid) {
+        .virtual => {},
+        .real => |rtid| {
+            // Take the lock
+            try self.lock.lock(self.storage_cache.io);
+            defer self.lock.unlock(self.storage_cache.io);
+            // Mark the status
+            try self.set(tid, status);
+            // Unregister as an active transaction
+            const index = std.sort.binarySearch(
+                ids.RealTransactionId,
+                self.active_transactions.items,
+                rtid,
+                struct {
+                    fn order(a: ids.RealTransactionId, b: ids.RealTransactionId) std.math.Order {
+                        return std.math.order(a.v, b.v);
+                    }
+                }.order,
+            );
+            std.debug.assert(index != null);
+            _ = self.active_transactions.orderedRemove(index.?);
+        },
+    }
+}
+
+pub fn getActiveTransactions(self: *TransactionLog, alloc: std.mem.Allocator) ![]ids.RealTransactionId {
+    try self.lock.lockShared(self.storage_cache.io);
+    defer self.lock.unlockShared(self.storage_cache.io);
+
+    return alloc.dupe(
+        ids.RealTransactionId,
+        self.active_transactions.items,
+    ) catch oom();
 }

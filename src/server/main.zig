@@ -67,7 +67,8 @@ pub fn main(init: std.process.Init) !void {
         try catalog_cache.build();
     }
 
-    var transaction_log = zigdb.transaction.Log.init(&storage_cache);
+    var transaction_log = zigdb.transaction.Log.init(&storage_cache, init.gpa);
+    defer transaction_log.deinit(init.gpa);
 
     var lock_manager = zigdb.lock.Manager.init(init.io, init.gpa);
     defer lock_manager.deinit(init.gpa);

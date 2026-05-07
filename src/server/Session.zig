@@ -56,9 +56,10 @@ pub fn execute_stmt(
 
     std.debug.print("{s}\n", .{query});
 
-    const catalog_snapshot = transaction.Snapshot.create(
+    const catalog_snapshot = try transaction.Snapshot.create(
         s.shared.transaction_log,
         s.current_tid,
+        arena.allocator(),
     );
     s.catalog_cache.rebuild(&catalog_snapshot) catch |e| {
         try sender.log(
@@ -128,16 +129,19 @@ pub fn execute_stmt(
     {
         errdefer if (s.explicit_transaction == .inactive) {
             // If something went wrong in an implicit transaction, abort it
-            s.shared.transaction_log.set(s.current_tid, .aborted) catch {};
+            s.shared.transaction_log.endTransaction(s.current_tid, .aborted) catch {};
+            s.current_tid = .virtual;
+            s.shared.lock_manager.unlockAll(s.thread_id) catch {};
         } else {
             // If something went wrong in an explicit transaction, mark it as broken
             s.explicit_transaction = .broken;
         };
 
         // Take a snapshot at the start of the command
-        const snapshot = transaction.Snapshot.create(
+        const snapshot = try transaction.Snapshot.create(
             s.shared.transaction_log,
             s.current_tid,
+            arena.allocator(),
         );
 
         // Form the execution context
@@ -164,7 +168,7 @@ pub fn execute_stmt(
 
         if (s.explicit_transaction == .inactive) {
             // Commit the transaction at the end, if it was implicit
-            try s.shared.transaction_log.set(s.current_tid, .committed);
+            try s.shared.transaction_log.endTransaction(s.current_tid, .committed);
             s.current_tid = .virtual;
             // Unlock all locks
             try s.shared.lock_manager.unlockAll(s.thread_id);

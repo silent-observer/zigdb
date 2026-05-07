@@ -9,7 +9,7 @@ const heap = @import("../heap.zig");
 /// Execute CREATE TABLE statement
 pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void {
     // We need a real transaction to write data
-    cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the catalog tables
     try cxt.s.shared.lock_manager.lock(
         .{ .table = .{
