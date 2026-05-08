@@ -82,6 +82,7 @@ pub const Token = struct {
         symbol: Symbol,
         id: void,
         num: void,
+        str: void,
         eof: void,
     };
 
@@ -221,6 +222,41 @@ fn lexNum(self: *Lexer) Token {
     };
 }
 
+/// Lex a single string literal.
+/// The number must match a regex '([^\]|\.)*'
+fn lexStr(self: *Lexer) ?Token {
+    const first = self.curr().?;
+    // This should only be called if the first character is already '
+    std.debug.assert(first == '\'');
+    self.pos += 1;
+    const start = self.pos;
+
+    // Advance until we get to ' (or the input ends).
+    // Also handle escape sequences.
+    while (self.curr()) |c| {
+        if (c == '\'') // End of the string
+            break
+        else if (c == '\\') // Escape sequence
+            self.pos += 2
+        else // Something else
+            self.pos += 1;
+    }
+    // This is the end of the string
+    const end = self.pos;
+    // The string must end with '
+    const last = self.curr();
+    if (last != '\'') {
+        return null;
+    }
+    self.pos += 1;
+
+    return .{
+        .kind = .str,
+        .start = @intCast(start),
+        .end = @intCast(end),
+    };
+}
+
 /// Lexer errors have a position attached to them
 pub const Error = struct {
     kind: Kind,
@@ -228,6 +264,7 @@ pub const Error = struct {
 
     pub const Kind = enum {
         unknown_character,
+        unclosed_string,
     };
 };
 
@@ -244,6 +281,16 @@ pub fn lex(self: *Lexer) ?Error {
         if (std.ascii.isWhitespace(c))
             // Skip whitespace
             self.pos += 1
+        else if (c == '\'')
+            // Lex a string literal if the first character is '
+            self.tokens.append(
+                self.alloc,
+                self.lexStr() orelse
+                    return Error{
+                        .kind = .unclosed_string,
+                        .pos = @intCast(self.pos),
+                    },
+            ) catch oom()
         else if (std.ascii.isAlphabetic(c) or c == '_')
             // Lex a word if the first character is [a-zA-Z_]
             self.tokens.append(self.alloc, self.lexWord()) catch oom()

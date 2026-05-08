@@ -591,6 +591,7 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 /// Parse an atomic expression. Currently only numbers and columns are supported.
 /// ```
 /// AtomicExpression = NUMBER
+///                  | STRING
 ///                  | Name
 /// ```
 fn parseAtomicExpression(p: *Parser) ast.Expression {
@@ -604,6 +605,34 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                 };
             p.pos += 1;
             return .{ .integer = x };
+        },
+        .str => {
+            const raw = t.text(p.input);
+            var arr = std.ArrayList(u8).initCapacity(p.alloc, raw.len) catch oom();
+            var i: usize = 0;
+            while (i < raw.len) {
+                if (raw[i] == '\\') {
+                    const c: u8 = switch (raw[i + 1]) {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '\'' => '\'',
+                        '"' => '"',
+                        '\\' => '\\',
+                        else => {
+                            p.addError(t, "Invalid escale sequence \"\\{}\"", .{raw[i + 1]});
+                            return .err;
+                        },
+                    };
+                    arr.appendAssumeCapacity(c);
+                    i += 2;
+                } else {
+                    arr.appendAssumeCapacity(raw[i]);
+                    i += 1;
+                }
+            }
+            p.pos += 1;
+            return .{ .string = arr.toOwnedSlice(p.alloc) catch oom() };
         },
         .id => {
             return .{ .variable = p.parseName() catch return .err };
