@@ -201,7 +201,7 @@ fn isConstExpression(expr: ast.Expression) bool {
         .variable => return false,
         .integer => return true,
         .string => return true,
-        .bool => return true,
+        .boolean => return true,
         .null => return true,
         .unary => |u| return isConstExpression(u.expr.*),
         .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
@@ -230,8 +230,8 @@ fn evalConstExpression(
             .v = .{ .text = str },
             .t = t,
         },
-        .bool => |b| return common.TypedValue{
-            .v = .{ .bool = b },
+        .boolean => |b| return common.TypedValue{
+            .v = .{ .boolean = b },
             .t = t,
         },
         .null => return common.TypedValue{
@@ -242,11 +242,11 @@ fn evalConstExpression(
             const x = try p.evalConstExpression(u.expr.*, cxt);
             switch (u.op) {
                 .null => return common.TypedValue{
-                    .v = .{ .bool = x.v == .null },
+                    .v = .{ .boolean = x.v == .null },
                     .t = t,
                 },
                 .not_null => return common.TypedValue{
-                    .v = .{ .bool = x.v != .null },
+                    .v = .{ .boolean = x.v != .null },
                     .t = t,
                 },
                 .neg => { // -x
@@ -261,7 +261,7 @@ fn evalConstExpression(
                     if (x.v == .null)
                         return x;
                     return common.TypedValue{
-                        .v = .{ .bool = !x.v.bool },
+                        .v = .{ .boolean = !x.v.boolean },
                         .t = t,
                     };
                 },
@@ -291,24 +291,24 @@ fn evalConstExpression(
                 },
                 .@"and", .@"or" => { // and, or
                     const v = switch (b.op) {
-                        .@"and" => lhs.v.bool and rhs.v.bool,
-                        .@"or" => lhs.v.bool or rhs.v.bool,
+                        .@"and" => lhs.v.boolean and rhs.v.boolean,
+                        .@"or" => lhs.v.boolean or rhs.v.boolean,
                         else => unreachable,
                     };
                     return common.TypedValue{
-                        .v = .{ .bool = v },
+                        .v = .{ .boolean = v },
                         .t = t,
                     };
                 },
                 .eq, .ne => { // =, <>
                     const v = switch (lhs.v) {
                         .null => unreachable,
-                        .bool => lhs.v.bool == rhs.v.bool,
+                        .boolean => lhs.v.boolean == rhs.v.boolean,
                         .int => lhs.v.int == rhs.v.int,
                         .text => std.mem.eql(u8, lhs.v.text.text(), rhs.v.text.text()),
                     };
                     return common.TypedValue{
-                        .v = .{ .bool = if (b.op == .eq) v else !v },
+                        .v = .{ .boolean = if (b.op == .eq) v else !v },
                         .t = t,
                     };
                 },
@@ -321,7 +321,7 @@ fn evalConstExpression(
                         else => unreachable,
                     };
                     return common.TypedValue{
-                        .v = .{ .bool = v },
+                        .v = .{ .boolean = v },
                         .t = t,
                     };
                 },
@@ -336,7 +336,7 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
     switch (expr) {
         .variable => |v| return v,
         .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
-        .bool => |b| return if (b) "t" else "f",
+        .boolean => |b| return if (b) "t" else "f",
         .null => return "null",
         .unary, .binary => return "expr",
         .string => |s| return s.text(),
@@ -371,7 +371,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     if (stmt.where) |condition| {
         const expr = p.make(try p.planExpression(condition.*, root.descr));
 
-        if (expr.dbtype != .bool) {
+        if (expr.dbtype != .boolean) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
@@ -429,7 +429,7 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     if (stmt.where) |condition| {
         const expr = p.make(try p.planExpression(condition.*, root.descr));
 
-        if (expr.dbtype != .bool) {
+        if (expr.dbtype != .boolean) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
@@ -464,7 +464,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     if (stmt.where) |condition| {
         const expr = p.make(try p.planExpression(condition.*, root.descr));
 
-        if (expr.dbtype != .bool) {
+        if (expr.dbtype != .boolean) {
             p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
             return Error.TypeError;
         }
@@ -587,13 +587,13 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
         },
         .integer => return .int4,
         .string => return .text,
-        .bool => return .bool,
+        .boolean => return .boolean,
         .null => return .any,
         .unary => |u| {
             const child = try p.inferExprType(u.expr.*, cxt);
             switch (u.op) {
                 .not, .neg => return child,
-                .null, .not_null => return .bool,
+                .null, .not_null => return .boolean,
             }
         },
         .binary => |u| {
@@ -610,13 +610,13 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                     } else return lhs.maxIntType(rhs);
                 },
                 .@"and", .@"or" => { // Can do and/or only on booleans
-                    if (lhs != .bool) {
+                    if (lhs != .boolean) {
                         p.addError("Cannot use logic operator on type {}", .{lhs});
                         return Error.TypeError;
-                    } else if (lhs != .bool) {
+                    } else if (lhs != .boolean) {
                         p.addError("Cannot use logic operator on type {}", .{rhs});
                         return Error.TypeError;
-                    } else return .bool;
+                    } else return .boolean;
                 },
                 .eq, .ne => { // Can check equality of numbers and values of the same type
                     const both_numbers = lhs.isNumber() and rhs.isNumber();
@@ -624,14 +624,14 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                     if (!both_numbers and !same_type) {
                         p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
                         return Error.TypeError;
-                    } else return .bool;
+                    } else return .boolean;
                 },
                 .lt, .gt, .le, .ge => { // Can only compare numbers
                     const both_numbers = lhs.isNumber() and rhs.isNumber();
                     if (!both_numbers) {
                         p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
                         return Error.TypeError;
-                    } else return .bool;
+                    } else return .boolean;
                 },
             }
         },
@@ -695,7 +695,7 @@ fn planExpression(
                 .dbtype = t,
             };
         },
-        .integer, .string, .bool, .null => unreachable, // This is supposed to be a constant
+        .integer, .string, .boolean, .null => unreachable, // This is supposed to be a constant
         .err => unreachable,
     }
 }

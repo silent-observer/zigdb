@@ -13,7 +13,7 @@ pub const DBType = enum(u32) {
     int2,
     int4,
     int8,
-    bool,
+    boolean,
     text,
     any,
 
@@ -33,7 +33,7 @@ pub const DBType = enum(u32) {
             .uint2, .int2 => 2,
             .uint4, .int4 => 4,
             .uint8, .int8 => 8,
-            .bool => 1,
+            .boolean => 1,
             .text => null,
             .any => null,
         };
@@ -80,7 +80,7 @@ pub const DBType = enum(u32) {
             .uint2, .int2 => 2,
             .uint4, .int4 => 4,
             .uint8, .int8 => 8,
-            .bool => 1,
+            .boolean => 1,
             .text => 8,
             .any => unreachable,
         };
@@ -98,7 +98,7 @@ pub const DBType = enum(u32) {
             .int2 => T == i16,
             .int4 => T == i32,
             .int8 => T == i64,
-            .bool => T == bool,
+            .boolean => T == bool,
             .text => T == []const u8,
             .any => unreachable,
         };

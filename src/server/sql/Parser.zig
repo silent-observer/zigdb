@@ -474,9 +474,9 @@ fn parseType(p: *Parser) InternalError!DBType {
             p.pos += 1;
             return .int4;
         },
-        .bool => {
+        .boolean => {
             p.pos += 1;
-            return .bool;
+            return .boolean;
         },
         .text => {
             p.pos += 1;
@@ -697,11 +697,11 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         .keyword => |kw| switch (kw) {
             .true => {
                 p.pos += 1;
-                return .{ .bool = true };
+                return .{ .boolean = true };
             },
             .false => {
                 p.pos += 1;
-                return .{ .bool = false };
+                return .{ .boolean = false };
             },
             .null => {
                 p.pos += 1;

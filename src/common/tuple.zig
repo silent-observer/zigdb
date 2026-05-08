@@ -253,7 +253,7 @@ pub const MemTuple = struct {
             .uint2 => return .{ .int = @intCast(std.mem.bytesToValue(u16, data)) },
             .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
-            .bool => return .{ .bool = std.mem.bytesToValue(bool, data) },
+            .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
             .text => return .{ .text = .{ .raw = data } },
             .any => unreachable,
         };
@@ -285,7 +285,7 @@ pub const MemTuple = struct {
             .uint2 => std.mem.bytesAsValue(u16, data).* = @intCast(val.int),
             .uint4, .oid => std.mem.bytesAsValue(u32, data).* = @intCast(val.int),
             .uint8 => std.mem.bytesAsValue(u64, data).* = @intCast(val.int),
-            .bool => std.mem.bytesAsValue(bool, data).* = val.bool,
+            .boolean => std.mem.bytesAsValue(bool, data).* = val.boolean,
             .text => @memcpy(data, val.text),
         };
     }
@@ -371,7 +371,7 @@ pub const MemTuple = struct {
             std.debug.assert(val.checkType(b.tuple().dbtype(i)));
 
             switch (b.tuple().dbtype(i)) {
-                .bool => b.pushBytes(std.mem.asBytes(&val.bool)),
+                .boolean => b.pushBytes(std.mem.asBytes(&val.boolean)),
                 .text => b.pushBytes(val.text.raw),
 
                 .int1 => {

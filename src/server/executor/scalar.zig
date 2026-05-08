@@ -16,9 +16,9 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
             const x = eval(u.child, tuple);
             return switch (u.op) {
                 .neg => if (x == .null) .null else .{ .int = -x.int },
-                .not => if (x == .null) .null else .{ .bool = !x.bool },
-                .null => .{ .bool = x == .null },
-                .not_null => .{ .bool = x != .null },
+                .not => if (x == .null) .null else .{ .boolean = !x.boolean },
+                .null => .{ .boolean = x == .null },
+                .not_null => .{ .boolean = x != .null },
             };
         },
         .binary => |b| {
@@ -39,20 +39,20 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
                 },
                 .@"and", .@"or" => {
                     const v = switch (b.op) {
-                        .@"and" => lhs.bool and rhs.bool,
-                        .@"or" => lhs.bool or rhs.bool,
+                        .@"and" => lhs.boolean and rhs.boolean,
+                        .@"or" => lhs.boolean or rhs.boolean,
                         else => unreachable,
                     };
-                    return .{ .bool = v };
+                    return .{ .boolean = v };
                 },
                 .eq, .ne => {
                     const v = switch (lhs) {
                         .null => unreachable,
-                        .bool => lhs.bool == rhs.bool,
+                        .boolean => lhs.boolean == rhs.boolean,
                         .int => lhs.int == rhs.int,
                         .text => std.mem.eql(u8, lhs.text.text(), rhs.text.text()),
                     };
-                    return .{ .bool = if (b.op == .eq) v else !v };
+                    return .{ .boolean = if (b.op == .eq) v else !v };
                 },
                 .lt, .gt, .le, .ge => {
                     const v = switch (b.op) {
@@ -62,7 +62,7 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
                         .ge => lhs.int >= rhs.int,
                         else => unreachable,
                     };
-                    return .{ .bool = v };
+                    return .{ .boolean = v };
                 },
             }
         },

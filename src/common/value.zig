@@ -18,7 +18,7 @@ pub const Text = struct {
 pub const Value = union(enum) {
     int: i64,
     text: Text,
-    bool: bool,
+    boolean: bool,
     null: void,
 
     /// Obtain comptime-known type from a Value.
@@ -32,8 +32,8 @@ pub const Value = union(enum) {
                 return v.text
             else
                 return Error.InvalidType,
-            bool => if (v == .bool)
-                return v.bool
+            bool => if (v == .boolean)
+                return v.boolean
             else
                 return Error.InvalidType,
             else => return Error.InvalidType,
@@ -56,7 +56,7 @@ pub const Value = union(enum) {
             .uint8,
             => return v == .int,
             .text => return v == .text,
-            .bool => return v == .bool,
+            .boolean => return v == .boolean,
         }
     }
 
@@ -70,7 +70,7 @@ pub const Value = union(enum) {
         switch (self) {
             .int => |x| try writer.print("{}", .{x}),
             .text => |s| try writer.print("\"{s}\"", .{s.text()}),
-            .bool => |b| try writer.print("{}", .{b}),
+            .boolean => |b| try writer.print("{}", .{b}),
         }
     }
 
@@ -86,7 +86,7 @@ pub const Value = union(enum) {
                     2 + std.math.log10_int(@as(u64, @intCast(-x)));
             },
             .text => |s| return s.len(),
-            .bool => return 1,
+            .boolean => return 1,
             .null => return 0,
         }
     }

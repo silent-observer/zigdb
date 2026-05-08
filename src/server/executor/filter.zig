@@ -35,7 +35,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
         // Check the condition
         const cond = scalar.eval(plan.action.filter.condition, input);
         // Return the tuple if condition is true, skip if false
-        if (cond.bool)
+        if (cond.boolean)
             return input;
     }
     // If the child is done, we are done too

@@ -80,7 +80,7 @@ pub const Expression = union(enum) {
     binary: Binary,
     integer: i64,
     string: Text,
-    bool: bool,
+    boolean: bool,
     null: void,
     err: void,
 
