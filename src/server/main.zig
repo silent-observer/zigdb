@@ -34,6 +34,15 @@ fn handleConnection(
 }
 
 pub fn main(init: std.process.Init) !void {
+    std.debug.print("Accepting connections!\n", .{});
+
+    const listen_addr = try std.Io.net.IpAddress.parse(
+        "0.0.0.0",
+        zigdb.common.network.default_port,
+    );
+    var tcp_server = try listen_addr.listen(init.io, .{});
+    defer tcp_server.deinit(init.io);
+
     // Create the temporary data directory (for testing)
     std.Io.Dir.createDirAbsolute(
         init.io,
@@ -87,15 +96,6 @@ pub fn main(init: std.process.Init) !void {
     };
 
     //try catalog_cache.rebuild();
-
-    std.debug.print("Accepting connections!\n", .{});
-
-    const listen_addr = try std.Io.net.IpAddress.parse(
-        "0.0.0.0",
-        zigdb.common.network.default_port,
-    );
-    var tcp_server = try listen_addr.listen(init.io, .{});
-    defer tcp_server.deinit(init.io);
 
     while (true) {
         const client_stream = try tcp_server.accept(init.io);

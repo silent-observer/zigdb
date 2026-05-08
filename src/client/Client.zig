@@ -10,6 +10,8 @@ const Client = @This();
 gpa: std.mem.Allocator,
 /// Arena allocator that lives only for the lifetime of one message.
 arena: std.heap.ArenaAllocator,
+/// Configuration
+config: Config,
 
 network_in_buffer: []u8,
 network_out_buffer: []u8,
@@ -18,30 +20,40 @@ network_writer: std.Io.net.Stream.Writer,
 
 stdin_buffer: []u8,
 stdin_reader: std.Io.File.Reader,
+stdout_buffer: []u8,
+stdout_writer: std.Io.File.Writer,
 /// Helper buffer for reading one line at a time
 line_buffer: std.Io.Writer.Allocating,
 
 /// Data for the table that is currently being assembled
 table: Table,
 
+pub const Config = struct {
+    prompt: bool = true,
+};
+
 /// Initialize a new client
-pub fn init(io: std.Io, gpa: std.mem.Allocator, stream: std.Io.net.Stream) Client {
+pub fn init(io: std.Io, gpa: std.mem.Allocator, stream: std.Io.net.Stream, config: Config) Client {
     const network_in_buffer = gpa.alloc(u8, 1024) catch common.oom();
     const network_out_buffer = gpa.alloc(u8, 1024) catch common.oom();
     const stdin_buffer = gpa.alloc(u8, 1024) catch common.oom();
+    const stdout_buffer = gpa.alloc(u8, 1024) catch common.oom();
 
     return Client{
         .gpa = gpa,
         .arena = .init(gpa),
+        .config = config,
         .table = .init(gpa),
 
         .network_in_buffer = network_in_buffer,
         .network_out_buffer = network_out_buffer,
         .stdin_buffer = stdin_buffer,
+        .stdout_buffer = stdout_buffer,
 
         .network_reader = stream.reader(io, network_in_buffer),
         .network_writer = stream.writer(io, network_out_buffer),
-        .stdin_reader = std.Io.File.stdin().readerStreaming(io, stdin_buffer),
+        .stdin_reader = std.Io.File.stdin().reader(io, stdin_buffer),
+        .stdout_writer = std.Io.File.stdout().writer(io, stdout_buffer),
         .line_buffer = std.Io.Writer.Allocating.init(gpa),
     };
 }
@@ -53,6 +65,7 @@ pub fn deinit(self: *Client) void {
     self.gpa.free(self.network_in_buffer);
     self.gpa.free(self.network_out_buffer);
     self.gpa.free(self.stdin_buffer);
+    self.gpa.free(self.stdout_buffer);
     self.line_buffer.deinit();
 }
 
@@ -77,19 +90,22 @@ pub fn loop(self: *Client) !void {
 
 /// Handle a single incoming message
 fn handleMessage(self: *Client, m: common.network.Message) !bool {
+    const stdout = &self.stdout_writer.interface;
     switch (m) {
-        .err => std.debug.print("Error!\n", .{}),
+        .err => try stdout.print("Error!\n", .{}),
         .success => if (self.table.descr != null) {
-            std.debug.print("{f}", .{self.table});
+            try stdout.print("{f}", .{self.table});
         },
         // Received a log message from server
-        .log => |l| std.debug.print("{s}\n", .{l}),
+        .log => |l| try stdout.print("{s}\n", .{l}),
         // Ready to send a new query
         .ready => {
             // Delete the last table we got
             self.table.reset();
             // Print prompt
-            std.debug.print("> ", .{});
+            if (self.config.prompt)
+                try stdout.print("> ", .{});
+            try stdout.flush();
             // Read one line from stdin to line writer
             _ = try self.stdin_reader.interface.streamDelimiterEnding(
                 &self.line_buffer.writer,
@@ -123,5 +139,6 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
         },
         .query, .exit => unreachable,
     }
+    try stdout.flush();
     return false;
 }
