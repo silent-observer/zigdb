@@ -93,9 +93,10 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
     const stdout = &self.stdout_writer.interface;
     switch (m) {
         .err => try stdout.print("Error!\n", .{}),
-        .success => if (self.table.descr != null) {
-            try stdout.print("{f}", .{self.table});
-        },
+        .success => |s| if (self.table.descr != null)
+            try stdout.print("{f}", .{self.table})
+        else
+            try stdout.print("{s}\n", .{s}),
         // Received a log message from server
         .log => |l| try stdout.print("{s}\n", .{l}),
         // Ready to send a new query

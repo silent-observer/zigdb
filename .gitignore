@@ -2,3 +2,4 @@
 .zig-cache
 zig-out
 tests/results
+regression.diff

@@ -2,8 +2,8 @@
 
 import os
 import shutil
-import subprocess
-import time
+import difflib
+import asyncio
 
 def parse_schedule(schedule: str):
     tests = []
@@ -13,59 +13,80 @@ def parse_schedule(schedule: str):
             tests.append(name.strip())
     return tests
 
-def run_test(test: str) -> bool:
+async def read_until_prompt(stdout: asyncio.StreamReader) -> str:
+    output = ''
+    while True:
+        output += (await stdout.read(1024)).decode()
+        if output.endswith('> '):
+            return output.removesuffix('> ')
+
+async def run_test(test: str) -> str:
     with (
         open(f'tests/sql/{test}.sql') as input_file,
         open(f'tests/results/{test}.out', 'w') as result_file
     ):
-        os.makedirs('/tmp/datadir', exist_ok=True)
+        try:
+            shutil.rmtree('/tmp/datadir')
+        except FileNotFoundError:
+            pass
+        os.makedirs('/tmp/datadir')
 
-        server = subprocess.Popen(
-            ["zig-out/bin/server"],
+        server = await asyncio.subprocess.create_subprocess_exec(
+            "zig-out/bin/server",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
         )
 
-        time.sleep(0.1)
+        await asyncio.sleep(0.1)
 
-        client = subprocess.Popen(
-            ["zig-out/bin/client", "--no-prompt"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            text=True
+        client = await asyncio.subprocess.create_subprocess_exec(
+            "zig-out/bin/client",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE
         )
         assert client.stdin is not None
         assert client.stdout is not None
-        os.set_blocking(client.stdout.fileno(), False)
+
+        await read_until_prompt(client.stdout)
 
         try:
             for line in input_file:
                 if line.strip() == '':
                     continue
                 result_file.write('> ' + line)
-                client.stdin.write(line.strip() + '\n')
-                client.stdin.flush()
-                time.sleep(0.1)
-                output = client.stdout.readlines()
-                print(output)
-                for output_line in output:
-                    result_file.write(output_line)
+                result_file.flush()
+                client.stdin.write((line.strip() + '\n').encode())
+                output = await read_until_prompt(client.stdout)
+                result_file.write(output)
+                result_file.flush()
         finally:
-            client.stdin.write('exit\n')
-            client.wait()
-            server.terminate()
+            client.stdin.write(b'exit\n')
+            await client.wait()
+            server.kill()
 
-        shutil.rmtree('/tmp/datadir')
-        return True
+    with (
+        open(f'tests/expected/{test}.out') as expected_file,
+        open(f'tests/results/{test}.out') as result_file
+    ):
+        expected = expected_file.readlines()
+        result = result_file.readlines()
+        diff = difflib.unified_diff(expected, result, fromfile=f'tests/expected/{test}.out', tofile=f'tests/results/{test}.out')
+        return ''.join(diff)
 
-def main():
+async def main():
     with open('tests/schedule.yaml') as file:
         schedule = file.read()
         schedule = parse_schedule(schedule)
     
     os.makedirs('tests/results', exist_ok=True)
 
-    for test in schedule:
-        result = run_test(test)
-        print(f'{test:<10} : {'ok' if result else 'FAILED'}')
+    with open('tests/regression.diff', 'w') as file:
+        for test in schedule:
+            diff = await run_test(test)
+            result = 'ok' if len(diff) == 0 else 'FAILED'
+            print(f'{test:<10} : {result}')
+            file.write(diff)
+            file.flush()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

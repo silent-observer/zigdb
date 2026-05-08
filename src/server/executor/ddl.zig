@@ -7,7 +7,7 @@ const ids = @import("common").ids;
 const heap = @import("../heap.zig");
 
 /// Execute CREATE TABLE statement
-pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void {
+pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]const u8 {
     // We need a real transaction to write data
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the catalog tables
@@ -64,4 +64,6 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) !void
         cxt.s.shared.storage_cache,
         .{ .db = cxt.s.db_id, .table = table_id },
     ).create();
+
+    return "CREATE TABLE";
 }

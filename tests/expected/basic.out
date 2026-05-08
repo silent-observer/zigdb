@@ -1,0 +1,25 @@
+> create table t (i int, t text, flag boolean);
+CREATE TABLE
+> insert into t values (1, 'hello', true), (2, 'world', false), (null, 'null', null);
+INSERT 3
+> select i, t, flag from t;
+ i |   t   | flag 
+---+-------+------
+ 1 | hello | t    
+ 2 | world | f    
+   | null  |      
+(3 rows)
+
+> select i, t, flag from t where i > 1;
+ i |   t   | flag 
+---+-------+------
+ 2 | world | f    
+(1 rows)
+
+> select i, t, flag from t where i is not null;
+ i |   t   | flag 
+---+-------+------
+ 1 | hello | t    
+ 2 | world | f    
+(2 rows)
+

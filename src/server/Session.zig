@@ -155,7 +155,7 @@ pub fn executeStmt(
             .sender = sender,
         };
         // Execute the query
-        Executor.execute(plan, &cxt) catch |err| {
+        const message = Executor.execute(plan, &cxt) catch |err| {
             if (err != Executor.Error.ExecutionError) {
                 try sender.log(
                     arena.allocator(),
@@ -181,6 +181,6 @@ pub fn executeStmt(
         try s.shared.storage_cache.flush(false);
 
         // Send the success message
-        try sender.send(.success);
+        try sender.send(.{ .success = message });
     }
 }

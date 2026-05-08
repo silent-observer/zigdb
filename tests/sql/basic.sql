@@ -1,4 +1,3 @@
-select rel_id, rel_name from zdb_rels;
 create table t (i int, t text, flag boolean);
 insert into t values (1, 'hello', true), (2, 'world', false), (null, 'null', null);
 select i, t, flag from t;

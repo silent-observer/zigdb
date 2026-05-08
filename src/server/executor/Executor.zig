@@ -23,8 +23,8 @@ pub const Error = error{
 pub fn execute(
     stmt: *const Plan.Statement,
     cxt: *Context,
-) !void {
-    switch (stmt.*) {
+) ![]const u8 {
+    return switch (stmt.*) {
         .create_table => try ddl.executeCreateTable(stmt.create_table, cxt),
         .insert => try modify.executeInsert(stmt.insert, cxt),
         .select => try executeSelect(stmt.select, cxt),
@@ -35,14 +35,14 @@ pub fn execute(
         .commit => try executeCommit(cxt),
         .rollback => try executeRollback(cxt),
         .drop_table => unreachable,
-    }
+    };
 }
 
 /// Execute a SELECT statement
 fn executeSelect(
     stmt: Plan.Statement.Select,
     cxt: *Context,
-) !void {
+) ![]const u8 {
     // Initialize the data node
     try initDataNode(stmt.root, cxt);
     // Don't forget to free it at the end
@@ -56,10 +56,13 @@ fn executeSelect(
         // And send them to the client
         try cxt.sender.send(.{ .tuple = tuple });
     }
+
+    // No success message
+    return "";
 }
 
 /// Execute a BEGIN statement
-fn executeBegin(cxt: *Context) !void {
+fn executeBegin(cxt: *Context) ![]const u8 {
     // Make sure we're not in a transaction
     if (cxt.s.explicit_transaction != .inactive) {
         try cxt.sender.log(cxt.alloc, "ERROR: already in transaction", .{});
@@ -67,10 +70,12 @@ fn executeBegin(cxt: *Context) !void {
     }
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     cxt.s.explicit_transaction = .active;
+
+    return "BEGIN";
 }
 
 /// Execute a COMMIT statement
-fn executeCommit(cxt: *Context) !void {
+fn executeCommit(cxt: *Context) ![]const u8 {
     // Make sure we're in an active transaction
     switch (cxt.s.explicit_transaction) {
         .active => {},
@@ -88,10 +93,12 @@ fn executeCommit(cxt: *Context) !void {
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
     try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
+
+    return "COMMIT";
 }
 
 /// Execute a ROLLBACK statement
-fn executeRollback(cxt: *Context) !void {
+fn executeRollback(cxt: *Context) ![]const u8 {
     // Make sure we're in a transaction
     switch (cxt.s.explicit_transaction) {
         .active, .broken => {},
@@ -105,6 +112,8 @@ fn executeRollback(cxt: *Context) !void {
     cxt.s.current_tid = .virtual;
     cxt.s.explicit_transaction = .inactive;
     try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
+
+    return "ROLLBACK";
 }
 
 /// Initialize any DataNode. Call this at the start of execution.

@@ -34,8 +34,8 @@ pub const default_port = 17301;
 /// - size (4 bytes) - how many bytes of data there are
 /// - data ("size" bytes) - the actual data, the exact contents depend on the tag
 ///
-/// "success", "err", "ready" and "exit" messages have no data, so their size is always 0.
-/// "log" and "query" messages have raw text as their data.
+/// "err", "ready" and "exit" messages have no data, so their size is always 0.
+/// "success", "log" and "query" messages have raw text as their data.
 /// "tuple" message data is the same format as MemTuple, but without the TupleDescriptor
 /// pointer in the header.
 ///
@@ -55,7 +55,7 @@ pub const default_port = 17301;
 pub const Message = union(Tag) {
     log: []const u8,
     query: []const u8,
-    success: void,
+    success: []const u8,
     err: void,
     ready: void,
     tuple_descriptor: *const t.TupleDescriptor,
@@ -78,6 +78,7 @@ pub const Message = union(Tag) {
         return switch (m) {
             .log => |l| l.len,
             .query => |q| q.len,
+            .success => |s| s.len,
             .tuple => |tuple| tuple.size() - @sizeOf(MemTuple.Header),
             .tuple_descriptor => |td| size: {
                 var total_size: usize = @sizeOf(u8) + @sizeOf(u16);
@@ -86,7 +87,7 @@ pub const Message = union(Tag) {
                 }
                 break :size total_size;
             },
-            .success, .err, .ready, .exit => 0,
+            .err, .ready, .exit => 0,
         };
     }
 
@@ -98,6 +99,7 @@ pub const Message = union(Tag) {
         switch (m) {
             .log => |l| try w.writeAll(l),
             .query => |l| try w.writeAll(l),
+            .success => |l| try w.writeAll(l),
             .tuple => |tup| {
                 const ptr: [*]u8 = @ptrCast(&tup.ptr.tail);
                 try w.writeAll(ptr[0..size]);
@@ -112,7 +114,7 @@ pub const Message = union(Tag) {
                     try w.writeAll(name);
                 }
             },
-            .success, .err, .ready, .exit => {},
+            .err, .ready, .exit => {},
         }
     }
 
@@ -129,6 +131,9 @@ pub const Message = union(Tag) {
             },
             .query => return .{
                 .query = try r.readAlloc(alloc, size),
+            },
+            .success => return .{
+                .success = try r.readAlloc(alloc, size),
             },
             .tuple => {
                 const tuple = MemTuple.allocUnitialized(alloc, size + @sizeOf(MemTuple.Header));
@@ -159,7 +164,6 @@ pub const Message = union(Tag) {
                 };
                 return .{ .tuple_descriptor = descr };
             },
-            .success => return .success,
             .err => return .err,
             .ready => return .ready,
             .exit => return .exit,

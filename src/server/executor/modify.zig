@@ -1,5 +1,7 @@
 //! Executor for table-modifying statements
 
+const std = @import("std");
+
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
@@ -11,7 +13,7 @@ const Executor = @import("Executor.zig");
 const oom = common.oom;
 
 /// Execute INSERT statement
-pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
+pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
     // We need a real transaction to write data
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
@@ -29,6 +31,7 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
     defer Executor.deinitDataNode(stmt.root, cxt);
 
     // Fetch input tuples one by one
+    var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         // And insert them into the output table
         _ = try heap.Table.init(
@@ -38,11 +41,14 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) !void {
                 .table = stmt.table,
             },
         ).addOneTuple(tuple);
+        counter += 1;
     }
+
+    return std.fmt.allocPrint(cxt.alloc, "INSERT {}", .{counter});
 }
 
 /// Execute DELETE statement
-pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
+pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) ![]const u8 {
     // We need a real transaction to write data
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
@@ -60,6 +66,7 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
     defer Executor.deinitDataNode(stmt.root, cxt);
 
     // Fetch input tuples one by one
+    var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         // And delete them from the table
         try heap.Table.init(
@@ -69,11 +76,14 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) !void {
                 .table = stmt.table,
             },
         ).deleteTupleAt(tuple.extended().pos, cxt.s.current_tid.real);
+        counter += 1;
     }
+
+    return std.fmt.allocPrint(cxt.alloc, "DELETE {}", .{counter});
 }
 
 /// Execute UPDATE statement
-pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
+pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
     // We need a real transaction to write data
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
     // Get a write lock on the table
@@ -98,6 +108,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
     defer cxt.alloc.free(temp_tuple);
 
     // Fetch input tuples one by one
+    var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         const table_id = ids.FullTableId{
             .db = cxt.s.db_id,
@@ -128,11 +139,14 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) !void {
         // Insert it back into the table
         _ = try heap.Table.init(cxt.s.shared.storage_cache, table_id)
             .addOneTuple(new_tuple);
+        counter += 1;
     }
+
+    return std.fmt.allocPrint(cxt.alloc, "UPDATE {}", .{counter});
 }
 
 /// Execute TRUNCATE statement
-pub fn executeTruncate(stmt: Plan.Statement.Truncate, cxt: *Context) !void {
+pub fn executeTruncate(stmt: Plan.Statement.Truncate, cxt: *Context) ![]const u8 {
     // Get an exclusive lock on the table
     try cxt.s.shared.lock_manager.lock(
         .{ .table = .{
@@ -150,4 +164,6 @@ pub fn executeTruncate(stmt: Plan.Statement.Truncate, cxt: *Context) !void {
             .table = stmt.table,
         },
     ).truncate();
+
+    return "TRUNCATE";
 }
