@@ -355,24 +355,13 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     const source = stmt.sources[0];
     const input_node = try p.planDataSource(source);
 
-    // The SELECT might contain expression that might need projection
-    var need_project = stmt.columns.len != input_node.descr.attrs.len or
-        input_node.descr.has_extended;
     // List of scalar nodes for expressions
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.len) catch oom();
     // Go through output columns in the query
-    for (stmt.columns, 0..) |c, i| {
+    for (stmt.columns) |c| {
         // Build a scalar node for each expression
-        const node = try p.planExpression(c, input_node.descr);
-        // We don't need projection only if all the expression are column names in the correct order.
-        // Otherwise, we do need a projection.
-        switch (node.action) {
-            .column => |j| if (i != j) {
-                need_project = true;
-            },
-            else => need_project = true,
-        }
+        const node = try p.planExpression(c.expr.*, input_node.descr);
         scalarNodes.appendAssumeCapacity(node);
     }
 
@@ -396,14 +385,18 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
         });
     }
 
-    // Add a projection node if needed
-    if (need_project) {
+    // SELECT basically always needs a projection
+    {
         // Build the description
         const new_descr = p.make(common.TupleDescriptor.empty);
         new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
         for (stmt.columns, scalarNodes.items) |c, n| {
+            const name = if (c.alias) |alias|
+                alias
+            else
+                try p.suggestExpressionName(c.expr.*);
             new_descr.attrs.appendAssumeCapacity(.{
-                .name = try p.suggestExpressionName(c),
+                .name = name,
                 .t = n.dbtype,
             });
         }

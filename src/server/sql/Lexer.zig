@@ -34,6 +34,7 @@ pub const Token = struct {
     pub const Keyword = enum(u8) {
         select,
         from,
+        as,
         where,
         insert,
         into,

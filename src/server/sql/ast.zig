@@ -19,9 +19,14 @@ pub const Statement = union(enum) {
     err: void,
 
     pub const Select = struct {
-        columns: []Expression,
+        columns: []ColumnExpression,
         sources: []DataSource,
         where: ?*Expression,
+
+        pub const ColumnExpression = struct {
+            expr: *Expression,
+            alias: ?Name,
+        };
     };
 
     pub const Delete = struct {

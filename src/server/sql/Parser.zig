@@ -192,12 +192,15 @@ fn parseStmt(p: *Parser) ast.Statement {
 
 /// Parse a SELECT statement
 /// ```
-/// Select = "SELECT" CommaList(Expression) "FROM" DataSourceList ("WHERE" Expression)? ";"
+/// Select = "SELECT" CommaList(ColumnExpression) "FROM" DataSourceList ("WHERE" Expression)? ";"
 /// ```
 fn parseSelect(p: *Parser) ast.Statement {
     p.expectKeyword(.select) catch return .err;
     const columns =
-        p.parseCommaList(ast.Expression, parseExpression);
+        p.parseCommaListErr(
+            ast.Statement.Select.ColumnExpression,
+            parseColumnExpression,
+        ) catch return .err;
     p.expectKeyword(.from) catch return .err;
     const sources = p.parseDataSourceList() catch return .err;
     const condition = if (p.eat(.{ .keyword = .where }))
@@ -210,6 +213,19 @@ fn parseSelect(p: *Parser) ast.Statement {
         .sources = sources,
         .where = condition,
     } };
+}
+
+/// Parse a column expression
+/// ```
+/// ColumnExpression = Expression ("AS" Name)?
+/// ```
+fn parseColumnExpression(p: *Parser) !ast.Statement.Select.ColumnExpression {
+    const expr = p.make(p.parseExpression());
+    const alias = if (p.eat(.{ .keyword = .as }))
+        try p.parseName()
+    else
+        null;
+    return .{ .expr = expr, .alias = alias };
 }
 
 /// Parse a DELETE statement
