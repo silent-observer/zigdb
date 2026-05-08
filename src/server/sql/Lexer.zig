@@ -53,6 +53,8 @@ pub const Token = struct {
         @"and",
         @"or",
         not,
+        true,
+        false,
     };
 
     pub const Symbol = enum(u8) {

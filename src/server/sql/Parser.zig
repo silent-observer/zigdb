@@ -592,11 +592,31 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 /// ```
 /// AtomicExpression = NUMBER
 ///                  | STRING
+///                  | "true"
+///                  | "false"
 ///                  | Name
 /// ```
 fn parseAtomicExpression(p: *Parser) ast.Expression {
     const t = p.peek();
     switch (t.kind) {
+        .keyword => |kw| switch (kw) {
+            .true => {
+                p.pos += 1;
+                return .{ .bool = true };
+            },
+            .false => {
+                p.pos += 1;
+                return .{ .bool = false };
+            },
+            else => {
+                p.addError(
+                    t,
+                    "Expected an expression but got \"{s}\"",
+                    .{t.text(p.input)},
+                );
+                return .err;
+            },
+        },
         .num => {
             const x =
                 std.fmt.parseInt(i64, t.text(p.input), 10) catch {

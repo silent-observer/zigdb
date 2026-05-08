@@ -201,6 +201,7 @@ fn isConstExpression(expr: ast.Expression) bool {
         .variable => return false,
         .integer => return true,
         .string => return true,
+        .bool => return true,
         .unary => |u| return isConstExpression(u.expr.*),
         .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
         .err => unreachable,
@@ -226,6 +227,10 @@ fn evalConstExpression(
         },
         .string => |str| return common.TypedValue{
             .v = .{ .text = str },
+            .t = t,
+        },
+        .bool => |b| return common.TypedValue{
+            .v = .{ .bool = b },
             .t = t,
         },
         .unary => |u| {
@@ -308,6 +313,7 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
     switch (expr) {
         .variable => |v| return v,
         .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
+        .bool => |b| return if (b) "t" else "f",
         .unary, .binary => return "expr",
         .string => |s| return s,
         .err => unreachable,
@@ -564,6 +570,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
         },
         .integer => return .int4,
         .string => return .text,
+        .bool => return .bool,
         .unary => |u| return p.inferExprType(u.expr.*, cxt),
         .binary => |u| {
             const lhs = try p.inferExprType(u.left.*, cxt);
@@ -664,7 +671,7 @@ fn planExpression(
                 .dbtype = t,
             };
         },
-        .integer, .string => unreachable, // This is supposed to be a constant
+        .integer, .string, .bool => unreachable, // This is supposed to be a constant
         .err => unreachable,
     }
 }
