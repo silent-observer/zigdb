@@ -92,7 +92,7 @@ pub fn format(
             switch (v) {
                 .bool => |b| try writer.writeByte(if (b) 't' else 'f'),
                 .int => |x| try writer.print("{}", .{x}),
-                .text => |s| try writer.writeAll(s),
+                .text => |s| try writer.writeAll(s.text()),
                 .null => {},
             }
 

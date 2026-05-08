@@ -9,6 +9,7 @@ pub const MemTuple = tuple.MemTuple;
 pub const value = @import("value.zig");
 pub const Value = value.Value;
 pub const TypedValue = value.TypedValue;
+pub const Text = value.Text;
 pub const oom = @import("utils.zig").oom;
 
 pub const ids = @import("ids.zig");

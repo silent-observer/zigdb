@@ -254,7 +254,7 @@ pub const MemTuple = struct {
             .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .bool => return .{ .bool = std.mem.bytesToValue(bool, data) },
-            .text => return .{ .text = data },
+            .text => return .{ .text = .{ .raw = data } },
             .any => unreachable,
         };
     }
@@ -372,7 +372,7 @@ pub const MemTuple = struct {
 
             switch (b.tuple().dbtype(i)) {
                 .bool => b.pushBytes(std.mem.asBytes(&val.bool)),
-                .text => b.pushBytes(val.text),
+                .text => b.pushBytes(val.text.raw),
 
                 .int1 => {
                     const x: i8 = @intCast(val.int);

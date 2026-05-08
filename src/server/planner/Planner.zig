@@ -295,10 +295,10 @@ fn evalConstExpression(
                         .null => unreachable,
                         .bool => lhs.v.bool == rhs.v.bool,
                         .int => lhs.v.int == rhs.v.int,
-                        .text => std.mem.eql(u8, lhs.v.text, rhs.v.text),
+                        .text => std.mem.eql(u8, lhs.v.text.text(), rhs.v.text.text()),
                     };
                     return common.TypedValue{
-                        .v = .{ .bool = v },
+                        .v = .{ .bool = if (b.op == .eq) v else !v },
                         .t = t,
                     };
                 },
@@ -329,7 +329,7 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
         .bool => |b| return if (b) "t" else "f",
         .null => return "null",
         .unary, .binary => return "expr",
-        .string => |s| return s,
+        .string => |s| return s.text(),
         .err => unreachable,
     }
 }

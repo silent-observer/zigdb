@@ -632,7 +632,8 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         },
         .str => {
             const raw = t.text(p.input);
-            var arr = std.ArrayList(u8).initCapacity(p.alloc, raw.len) catch oom();
+            var arr = std.ArrayList(u8).initCapacity(p.alloc, raw.len + 1) catch oom();
+            arr.appendAssumeCapacity(0); // Mandatory 0 start
             var i: usize = 0;
             while (i < raw.len) {
                 if (raw[i] == '\\') {
@@ -656,7 +657,7 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                 }
             }
             p.pos += 1;
-            return .{ .string = arr.toOwnedSlice(p.alloc) catch oom() };
+            return .{ .string = .{ .raw = arr.toOwnedSlice(p.alloc) catch oom() } };
         },
         .id => {
             return .{ .variable = p.parseName() catch return .err };

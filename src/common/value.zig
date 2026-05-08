@@ -2,11 +2,22 @@ const std = @import("std");
 const t = @import("types.zig");
 const oom = @import("utils.zig").oom;
 
+/// Text is a special type, because it always starts with a 0 byte to distinguish from NULL
+pub const Text = struct {
+    raw: []const u8,
+    pub fn text(self: Text) []const u8 {
+        return self.raw[1..];
+    }
+    pub fn len(self: Text) usize {
+        return self.raw.len - 1;
+    }
+};
+
 /// Value of runtime-known type.
 /// The type is not actually specified, only the value is.
 pub const Value = union(enum) {
     int: i64,
-    text: []const u8,
+    text: Text,
     bool: bool,
     null: void,
 
@@ -17,7 +28,7 @@ pub const Value = union(enum) {
                 return @intCast(v.int)
             else
                 return Error.InvalidType,
-            []const u8 => if (v == .text)
+            Text => if (v == .text)
                 return v.text
             else
                 return Error.InvalidType,
@@ -58,7 +69,7 @@ pub const Value = union(enum) {
     ) std.Io.Writer.Error!void {
         switch (self) {
             .int => |x| try writer.print("{}", .{x}),
-            .text => |s| try writer.print("\"{s}\"", .{s}),
+            .text => |s| try writer.print("\"{s}\"", .{s.text()}),
             .bool => |b| try writer.print("{}", .{b}),
         }
     }
@@ -74,7 +85,7 @@ pub const Value = union(enum) {
                 else
                     2 + std.math.log10_int(@as(u64, @intCast(-x)));
             },
-            .text => |s| return s.len,
+            .text => |s| return s.len(),
             .bool => return 1,
             .null => return 0,
         }

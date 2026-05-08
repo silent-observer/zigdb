@@ -50,9 +50,9 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
                         .null => unreachable,
                         .bool => lhs.bool == rhs.bool,
                         .int => lhs.int == rhs.int,
-                        .text => std.mem.eql(u8, lhs.text, rhs.text),
+                        .text => std.mem.eql(u8, lhs.text.text(), rhs.text.text()),
                     };
-                    return .{ .bool = v };
+                    return .{ .bool = if (b.op == .eq) v else !v };
                 },
                 .lt, .gt, .le, .ge => {
                     const v = switch (b.op) {

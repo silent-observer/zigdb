@@ -1,7 +1,9 @@
 //! Abstract Syntax Tree of SQL
 
 const std = @import("std");
-const DBType = @import("common").DBType;
+const common = @import("common");
+const DBType = common.DBType;
+const Text = common.Text;
 
 pub const Statement = union(enum) {
     select: Select,
@@ -72,7 +74,7 @@ pub const Expression = union(enum) {
     unary: Unary,
     binary: Binary,
     integer: i64,
-    string: []const u8,
+    string: Text,
     bool: bool,
     null: void,
     err: void,
