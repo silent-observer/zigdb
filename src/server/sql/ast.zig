@@ -74,6 +74,7 @@ pub const Expression = union(enum) {
     integer: i64,
     string: []const u8,
     bool: bool,
+    null: void,
     err: void,
 
     pub const Binary = struct {

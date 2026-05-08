@@ -15,9 +15,11 @@ pub const DBType = enum(u32) {
     int8,
     bool,
     text,
+    any,
 
     /// Can this type be silently converted to other type?
     pub fn convertsTo(self: DBType, other: DBType) bool {
+        if (self == .any) return true;
         if (std.meta.eql(self, other)) return true;
         if (self == .oid and other == .uint4) return true;
         return false;
@@ -33,6 +35,7 @@ pub const DBType = enum(u32) {
             .uint8, .int8 => 8,
             .bool => 1,
             .text => null,
+            .any => null,
         };
     }
 
@@ -79,6 +82,7 @@ pub const DBType = enum(u32) {
             .uint8, .int8 => 8,
             .bool => 1,
             .text => 8,
+            .any => unreachable,
         };
     }
 
@@ -96,6 +100,7 @@ pub const DBType = enum(u32) {
             .int8 => T == i64,
             .bool => T == bool,
             .text => T == []const u8,
+            .any => unreachable,
         };
     }
 };

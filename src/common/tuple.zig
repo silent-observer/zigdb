@@ -242,6 +242,8 @@ pub const MemTuple = struct {
     /// Get i-th attribute with a runtime-known type.
     pub fn getValue(self: MemTuple, i: usize) Value {
         const data: []const u8 = self.dataPtr(i);
+        if (data.len == 0)
+            return .null;
         return switch (self.dbtype(i)) {
             .int1 => return .{ .int = @intCast(std.mem.bytesToValue(i8, data)) },
             .int2 => return .{ .int = @intCast(std.mem.bytesToValue(i16, data)) },
@@ -253,6 +255,7 @@ pub const MemTuple = struct {
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .bool => return .{ .bool = std.mem.bytesToValue(bool, data) },
             .text => return .{ .text = data },
+            .any => unreachable,
         };
     }
 
@@ -360,6 +363,11 @@ pub const MemTuple = struct {
         pub fn pushValue(b: *Builder, val: Value) void {
             const i = b.index;
             std.debug.assert(i < b.tuple().len());
+            if (val == .null) {
+                // Special case for NULLs
+                b.pushBytes(&.{});
+                return;
+            }
             std.debug.assert(val.checkType(b.tuple().dbtype(i)));
 
             switch (b.tuple().dbtype(i)) {
@@ -399,6 +407,7 @@ pub const MemTuple = struct {
                     const x: u64 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },
+                .any => unreachable,
             }
         }
 

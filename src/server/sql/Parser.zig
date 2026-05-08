@@ -608,6 +608,10 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                 p.pos += 1;
                 return .{ .bool = false };
             },
+            .null => {
+                p.pos += 1;
+                return .null;
+            },
             else => {
                 p.addError(
                     t,

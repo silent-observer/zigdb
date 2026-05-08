@@ -83,7 +83,7 @@ pub fn format(
 
             const total_pad = w - width;
             const left_pad = switch (v) {
-                .bool, .text => 0,
+                .bool, .text, .null => 0,
                 .int => total_pad,
             };
             const right_pad = total_pad - left_pad;
@@ -93,6 +93,7 @@ pub fn format(
                 .bool => |b| try writer.writeByte(if (b) 't' else 'f'),
                 .int => |x| try writer.print("{}", .{x}),
                 .text => |s| try writer.writeAll(s),
+                .null => {},
             }
 
             try writer.splatByteAll(' ', right_pad + 1);

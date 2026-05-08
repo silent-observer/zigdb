@@ -55,6 +55,7 @@ pub const Token = struct {
         not,
         true,
         false,
+        null,
     };
 
     pub const Symbol = enum(u8) {

@@ -14,6 +14,8 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
         .value => |v| return v, // Constant value
         .unary => |u| {
             const x = eval(u.child, tuple);
+            if (x == .null)
+                return .null;
             return switch (u.op) {
                 .neg => .{ .int = -x.int },
                 .not => .{ .bool = !x.bool },
@@ -22,6 +24,8 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
         .binary => |b| {
             const lhs = eval(b.left, tuple);
             const rhs = eval(b.right, tuple);
+            if (lhs == .null or rhs == .null)
+                return .null;
             switch (b.op) {
                 .add, .sub, .mul, .div => {
                     const v = switch (b.op) {
@@ -43,6 +47,7 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
                 },
                 .eq, .ne => {
                     const v = switch (lhs) {
+                        .null => unreachable,
                         .bool => lhs.bool == rhs.bool,
                         .int => lhs.int == rhs.int,
                         .text => std.mem.eql(u8, lhs.text, rhs.text),

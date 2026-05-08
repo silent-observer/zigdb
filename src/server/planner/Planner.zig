@@ -202,6 +202,7 @@ fn isConstExpression(expr: ast.Expression) bool {
         .integer => return true,
         .string => return true,
         .bool => return true,
+        .null => return true,
         .unary => |u| return isConstExpression(u.expr.*),
         .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
         .err => unreachable,
@@ -233,8 +234,14 @@ fn evalConstExpression(
             .v = .{ .bool = b },
             .t = t,
         },
+        .null => return common.TypedValue{
+            .v = .null,
+            .t = .any,
+        },
         .unary => |u| {
             const x = try p.evalConstExpression(u.expr.*, cxt);
+            if (x.v == .null)
+                return x;
             switch (u.op) {
                 .neg => { // -x
                     return common.TypedValue{
@@ -253,6 +260,11 @@ fn evalConstExpression(
         .binary => |b| {
             const lhs = try p.evalConstExpression(b.left.*, cxt);
             const rhs = try p.evalConstExpression(b.right.*, cxt);
+            if (lhs.v == .null or rhs.v == .null)
+                return common.TypedValue{
+                    .v = .null,
+                    .t = t,
+                };
             switch (b.op) {
                 .add, .sub, .mul, .div => { // +, -, *, /
                     const v = switch (b.op) {
@@ -280,6 +292,7 @@ fn evalConstExpression(
                 },
                 .eq, .ne => { // =, <>
                     const v = switch (lhs.v) {
+                        .null => unreachable,
                         .bool => lhs.v.bool == rhs.v.bool,
                         .int => lhs.v.int == rhs.v.int,
                         .text => std.mem.eql(u8, lhs.v.text, rhs.v.text),
@@ -314,6 +327,7 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
         .variable => |v| return v,
         .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
         .bool => |b| return if (b) "t" else "f",
+        .null => return "null",
         .unary, .binary => return "expr",
         .string => |s| return s,
         .err => unreachable,
@@ -571,6 +585,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
         .integer => return .int4,
         .string => return .text,
         .bool => return .bool,
+        .null => return .any,
         .unary => |u| return p.inferExprType(u.expr.*, cxt),
         .binary => |u| {
             const lhs = try p.inferExprType(u.left.*, cxt);
@@ -671,7 +686,7 @@ fn planExpression(
                 .dbtype = t,
             };
         },
-        .integer, .string, .bool => unreachable, // This is supposed to be a constant
+        .integer, .string, .bool, .null => unreachable, // This is supposed to be a constant
         .err => unreachable,
     }
 }

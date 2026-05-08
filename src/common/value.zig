@@ -8,6 +8,7 @@ pub const Value = union(enum) {
     int: i64,
     text: []const u8,
     bool: bool,
+    null: void,
 
     /// Obtain comptime-known type from a Value.
     pub fn to(comptime T: type, v: Value) Error!T {
@@ -30,7 +31,9 @@ pub const Value = union(enum) {
 
     /// Check if type of Value matches given DBType.
     pub fn checkType(v: Value, dbtype: t.DBType) bool {
+        if (v == .null) return true;
         switch (dbtype) {
+            .any => return true,
             .oid,
             .int1,
             .int2,
@@ -73,6 +76,7 @@ pub const Value = union(enum) {
             },
             .text => |s| return s.len,
             .bool => return 1,
+            .null => return 0,
         }
     }
 };
