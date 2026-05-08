@@ -240,16 +240,26 @@ fn evalConstExpression(
         },
         .unary => |u| {
             const x = try p.evalConstExpression(u.expr.*, cxt);
-            if (x.v == .null)
-                return x;
             switch (u.op) {
+                .null => return common.TypedValue{
+                    .v = .{ .bool = x.v == .null },
+                    .t = t,
+                },
+                .not_null => return common.TypedValue{
+                    .v = .{ .bool = x.v != .null },
+                    .t = t,
+                },
                 .neg => { // -x
+                    if (x.v == .null)
+                        return x;
                     return common.TypedValue{
                         .v = .{ .int = -x.v.int },
                         .t = t,
                     };
                 },
                 .not => { // not x
+                    if (x.v == .null)
+                        return x;
                     return common.TypedValue{
                         .v = .{ .bool = !x.v.bool },
                         .t = t,
@@ -586,7 +596,13 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
         .string => return .text,
         .bool => return .bool,
         .null => return .any,
-        .unary => |u| return p.inferExprType(u.expr.*, cxt),
+        .unary => |u| {
+            const child = try p.inferExprType(u.expr.*, cxt);
+            switch (u.op) {
+                .not, .neg => return child,
+                .null, .not_null => return .bool,
+            }
+        },
         .binary => |u| {
             const lhs = try p.inferExprType(u.left.*, cxt);
             const rhs = try p.inferExprType(u.right.*, cxt);

@@ -14,11 +14,11 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
         .value => |v| return v, // Constant value
         .unary => |u| {
             const x = eval(u.child, tuple);
-            if (x == .null)
-                return .null;
             return switch (u.op) {
-                .neg => .{ .int = -x.int },
-                .not => .{ .bool = !x.bool },
+                .neg => if (x == .null) .null else .{ .int = -x.int },
+                .not => if (x == .null) .null else .{ .bool = !x.bool },
+                .null => .{ .bool = x == .null },
+                .not_null => .{ .bool = x != .null },
             };
         },
         .binary => |b| {

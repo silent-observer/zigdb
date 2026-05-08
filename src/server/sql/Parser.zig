@@ -477,10 +477,65 @@ fn parseType(p: *Parser) InternalError!DBType {
     return InternalError.UnexpectedToken;
 }
 
+/// This parses an expression. Expressions use a Pratt parser
+/// to handle precendence properly through binding power.
+/// The general (ambiguous) grammar is the following:
+///
+/// ```
+/// Expression = AtomicExpression
+///            | PrefixOp Expression
+///            | Expression PostfixOp
+///            | Expression InfixOp Expression
+///            | "(" Expression ")"
+/// PrefixOp = "-"
+///          | "NOT"
+/// PostfixOp = "IS" "NULL"
+///           | "IS" "NOT" "NULL"
+/// InfixOp = "+" | "-" | "*" | "/"
+///         | "=" | "<>"
+///         | ">" | "<" | ">=" | "<="
+///         | "AND" | "OR"
+/// ```
+///
+/// To make this grammar not ambiguous, precendences are determined
+/// by giving each operator "binding power". Prefix and postfix
+/// operators have one binding power each, and infix have left and right binding powers.
+/// For example, if we have an expression like "A op1 B op2 C", then it is parsed
+/// like "(A op1 B) op2 C" if op1 binds stronger to B than op2, so if op1's right BP
+/// power is bigger than op2's left BP. Similarly, it is parsed like "A op1 (B op2 C)"
+/// if op1's right BP is less than op2's left BP.
+///
+/// Here are the binding power tables, sorted from strongest to weakest:
+///
+/// ```
+///     Operator   | Left | Right
+/// ---------------+------+-------
+///  - (unary)     |      |    25
+///  *, /          |   23 |    24
+///  +, -          |   21 |    22
+///  IS (NOT) NULL |   10 |
+/// <, >, <=, >=   |    8 |     9
+/// =, <>          |    7 |     6
+/// NOT            |      |     5
+/// AND            |    3 |     4
+/// OR             |    1 |     2
+/// ```
 fn parseExpression(p: *Parser) ast.Expression {
     return p.parseExpressionPratt(0);
 }
 
+/// Calculate binding power for a postfix operator
+fn postfixBindingPower(t: Lexer.Token.Kind) ?u8 {
+    return switch (t) {
+        .keyword => |kw| switch (kw) {
+            .is => 10,
+            else => null,
+        },
+        else => null,
+    };
+}
+
+/// Calculate binding power for a prefix operator
 fn prefixBindingPower(t: Lexer.Token.Kind) ?u8 {
     return switch (t) {
         .symbol => |s| switch (s) {
@@ -495,11 +550,12 @@ fn prefixBindingPower(t: Lexer.Token.Kind) ?u8 {
     };
 }
 
+/// Calculate left and right binding powers for an infix operator
 fn infixBindingPower(t: Lexer.Token.Kind) ?struct { l: u8, r: u8 } {
     return switch (t) {
         .symbol => |s| switch (s) {
-            .eq, .ne => .{ .l = 6, .r = 5 },
-            .lt, .gt, .le, .ge => .{ .l = 7, .r = 8 },
+            .eq, .ne => .{ .l = 7, .r = 6 },
+            .lt, .gt, .le, .ge => .{ .l = 8, .r = 9 },
             .plus, .minus => .{ .l = 21, .r = 22 },
             .star, .slash => .{ .l = 23, .r = 24 },
             else => null,
@@ -513,6 +569,7 @@ fn infixBindingPower(t: Lexer.Token.Kind) ?struct { l: u8, r: u8 } {
     };
 }
 
+/// Convert token into a binary operator
 fn infixOp(t: Lexer.Token.Kind) ?ast.Expression.Binary.Op {
     return switch (t) {
         .symbol => |s| switch (s) {
@@ -537,6 +594,7 @@ fn infixOp(t: Lexer.Token.Kind) ?ast.Expression.Binary.Op {
     };
 }
 
+/// Actual recursive Pratt parser for expressions
 fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
     const t = p.peek();
     var lhs = switch (t.kind) {
@@ -566,6 +624,26 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 
     while (true) {
         const op_token = p.peek();
+
+        if (postfixBindingPower(op_token.kind)) |bp| {
+            if (bp < min_bp)
+                break;
+            p.advance();
+
+            if (op_token.matches(.{ .keyword = .is })) {
+                const negate = p.eat(.{ .keyword = .not });
+                p.expectKeyword(.null) catch return .err;
+
+                const op: ast.Expression.Unary.Op = if (negate) .not_null else .null;
+                const new = ast.Expression{ .unary = .{
+                    .op = op,
+                    .expr = p.make(lhs),
+                } };
+                lhs = new;
+                continue;
+            } else unreachable;
+        }
+
         if (infixBindingPower(op_token.kind)) |bp| {
             if (bp.l < min_bp)
                 break;
@@ -575,11 +653,12 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
             const lhs_expr = p.make(lhs);
             const rhs_expr = p.make(p.parseExpressionPratt(bp.r));
 
-            lhs = .{ .binary = .{
+            const new = ast.Expression{ .binary = .{
                 .op = infixOp(op_token.kind).?,
                 .left = lhs_expr,
                 .right = rhs_expr,
             } };
+            lhs = new;
             continue;
         }
 

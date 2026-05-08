@@ -107,6 +107,8 @@ pub const Expression = union(enum) {
         pub const Op = enum {
             neg,
             not,
+            null,
+            not_null,
         };
     };
 };

@@ -100,13 +100,13 @@ pub fn executeStmt(
         return;
     }
 
-    // {
-    //     const formatted = std.json.fmt(
-    //         stmt,
-    //         .{ .whitespace = .indent_2 },
-    //     );
-    //     std.debug.print("{f}\n", .{formatted});
-    // }
+    {
+        const formatted = std.json.fmt(
+            stmt,
+            .{ .whitespace = .indent_2 },
+        );
+        std.debug.print("{f}\n", .{formatted});
+    }
 
     // Plan the parsed query
     var pl = Planner.init(arena.allocator(), s.catalog_cache);
