@@ -11,12 +11,16 @@ pub fn main(init: std.process.Init) !void {
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--no-prompt"))
             config.prompt = false;
+        if (std.mem.eql(u8, arg, "-p")) {
+            const port = args.next().?;
+            config.port = try std.fmt.parseInt(u16, port, 10);
+        }
     }
 
     // Initialize the server address
     const server_addr = try std.Io.net.IpAddress.parse(
         "127.0.0.1",
-        common.network.default_port,
+        config.port,
     );
     // Start the connection
     const stream = try server_addr.connect(init.io, .{

@@ -4,6 +4,7 @@ import os
 import shutil
 import difflib
 import asyncio
+import random
 
 def parse_schedule(schedule: str):
     tests = []
@@ -31,8 +32,11 @@ async def run_test(test: str) -> str:
             pass
         os.makedirs('/tmp/datadir')
 
+        port = random.randint(17300, 17400)
+
         server = await asyncio.subprocess.create_subprocess_exec(
             "zig-out/bin/server",
+            "-p", str(port),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
@@ -41,6 +45,7 @@ async def run_test(test: str) -> str:
 
         client = await asyncio.subprocess.create_subprocess_exec(
             "zig-out/bin/client",
+            "-p", str(port),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE
         )
@@ -95,7 +100,7 @@ async def main():
         if errors > 0:
             print(f'{errors} tests out of {total} failed')
         else:
-            print(f'All {total} successful')
+            print(f'All {total} tests successful')
 
 if __name__ == "__main__":
     asyncio.run(main())

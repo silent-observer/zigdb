@@ -34,11 +34,21 @@ fn handleConnection(
 }
 
 pub fn main(init: std.process.Init) !void {
-    std.debug.print("Accepting connections!\n", .{});
+    // Parse arguments
+    var port: u16 = zigdb.common.network.default_port;
+    var args = init.minimal.args.iterate();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "-p")) {
+            const port_str = args.next().?;
+            port = try std.fmt.parseInt(u16, port_str, 10);
+        }
+    }
+
+    std.debug.print("Accepting connections on port {}!\n", .{port});
 
     const listen_addr = try std.Io.net.IpAddress.parse(
         "0.0.0.0",
-        zigdb.common.network.default_port,
+        port,
     );
     var tcp_server = try listen_addr.listen(init.io, .{});
     defer tcp_server.deinit(init.io);

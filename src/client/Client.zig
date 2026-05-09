@@ -30,6 +30,7 @@ table: Table,
 
 pub const Config = struct {
     prompt: bool = true,
+    port: u16 = common.network.default_port,
 };
 
 /// Initialize a new client
