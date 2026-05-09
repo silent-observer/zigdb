@@ -22,6 +22,9 @@ const Planner = planner.Planner;
 
 const Session = @This();
 
+/// We have a thread-local global session instance
+threadlocal var session: ?Session = null;
+
 /// Global allocator
 gpa: std.mem.Allocator,
 /// Cache of catalog tables.
@@ -52,8 +55,17 @@ pub const Shared = struct {
     logger: *Logger.Shared,
 };
 
+pub fn register(s: Session) void {
+    session = s;
+}
+
+pub fn get() *Session {
+    return &session.?;
+}
+
 /// Execute a single statement
-pub fn executeStmt(s: *Session, query: []const u8) !void {
+pub fn executeStmt(query: []const u8) !void {
+    const s = get();
     // Temporary arena for this statement
     var arena = std.heap.ArenaAllocator.init(s.gpa);
     defer arena.deinit();
@@ -124,7 +136,6 @@ pub fn executeStmt(s: *Session, query: []const u8) !void {
         // Form the execution context
         var cxt = Context{
             .alloc = arena.allocator(),
-            .s = s,
             .snapshot = &snapshot,
         };
         // Execute the query

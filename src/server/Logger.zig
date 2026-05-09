@@ -86,16 +86,14 @@ pub const Shared = struct {
 
 /// Shared data
 shared: *Shared,
-/// Current session
-session: *Session,
 /// Threshold for server-logged messages.
 server_level: Level = .log,
 /// Threshold for client-logged messages.
 client_level: Level = .notice,
 
 /// Initialize the thread-local part of the logger.
-pub fn register(shared: *Logger.Shared, session: *Session) void {
-    local_logger = .{ .shared = shared, .session = session };
+pub fn register(shared: *Logger.Shared) void {
+    local_logger = .{ .shared = shared };
 }
 
 /// Remove the thread-local logger
@@ -111,7 +109,7 @@ pub fn printPayload(level: Level, comptime fmt: []const u8, args: anytype, paylo
         return;
 
     const l = local_logger.?.shared;
-    const s = local_logger.?.session;
+    const s = Session.get();
     // Take the mutex to avoid concurrent logging
     l.mutex.lock(l.io) catch return;
     defer l.mutex.unlock(l.io);

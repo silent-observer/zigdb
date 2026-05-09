@@ -10,7 +10,6 @@ const transaction = @import("../transaction.zig");
 const Session = @import("../Session.zig");
 
 alloc: std.mem.Allocator, // Allocator for tuples
-s: *Session, // Common session data
 snapshot: *const transaction.Snapshot, // Current snapshot
 
 pub const Error = error{

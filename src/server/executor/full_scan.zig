@@ -9,6 +9,7 @@ const catalog = @import("../catalog.zig");
 const heap = @import("../heap.zig");
 const common = @import("common");
 const oom = common.oom;
+const Session = @import("../Session.zig");
 
 /// The internal state of the FullScan
 const State = struct {
@@ -17,22 +18,23 @@ const State = struct {
 
 /// Initialize the FullScan DataNode
 pub fn init(plan: *Plan.DataNode, cxt: *Context) !void {
+    const s = Session.get();
     std.debug.assert(plan.action == .full_scan);
     // Initialize the table scanner
     const table_id = plan.action.full_scan.table;
-    try cxt.s.shared.lock_manager.lock(
+    try s.shared.lock_manager.lock(
         .{ .table = .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = table_id,
         } },
         .read,
-        cxt.s.thread_id,
+        s.thread_id,
     );
 
-    const descr = cxt.s.catalog_cache.descr.getPtr(table_id).?;
+    const descr = s.catalog_cache.descr.getPtr(table_id).?;
     const scanner = try heap.Scanner.init(
-        cxt.s.shared.storage_cache,
-        .{ .db = cxt.s.db_id, .table = table_id },
+        s.shared.storage_cache,
+        .{ .db = s.db_id, .table = table_id },
         descr,
         cxt.snapshot,
     );

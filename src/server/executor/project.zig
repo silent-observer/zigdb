@@ -11,6 +11,7 @@ const common = @import("common");
 const oom = common.oom;
 const Executor = @import("Executor.zig");
 const scalar = @import("scalar.zig");
+const Session = @import("../Session.zig");
 
 /// Initialize the Project DataNode
 pub fn init(plan: *Plan.DataNode, cxt: *Context) !void {
@@ -28,6 +29,7 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
 
 /// Fetch one tuple from Project DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
+    const s = Session.get();
     std.debug.assert(plan.action == .project);
     // Get one tuple from child
     const input = try Executor.execDataNode(plan.action.project.input, cxt);
@@ -51,9 +53,9 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     }
     // Add extended fields if needed
     if (plan.descr.has_extended) {
-        std.debug.assert(cxt.s.current_tid == .real);
+        std.debug.assert(s.current_tid == .real);
         b.addExtended(.{
-            .xmin = cxt.s.current_tid.real,
+            .xmin = s.current_tid.real,
             .xmax = .invalid,
             .pos = .none,
         });

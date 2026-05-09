@@ -14,6 +14,7 @@ const common = @import("common");
 const heap = @import("../heap.zig");
 const oom = common.oom;
 const Logger = @import("../Logger.zig");
+const Session = @import("../Session.zig");
 
 pub const Executor = @This();
 pub const Error = error{
@@ -26,16 +27,16 @@ pub fn execute(
     cxt: *Context,
 ) ![]const u8 {
     return switch (stmt.*) {
-        .create_table => try ddl.executeCreateTable(stmt.create_table, cxt),
-        .drop_table => try ddl.executeDropTable(stmt.drop_table, cxt),
+        .create_table => try ddl.executeCreateTable(stmt.create_table),
+        .drop_table => try ddl.executeDropTable(stmt.drop_table),
         .insert => try modify.executeInsert(stmt.insert, cxt),
         .select => try executeSelect(stmt.select, cxt),
-        .truncate => try modify.executeTruncate(stmt.truncate, cxt),
+        .truncate => try modify.executeTruncate(stmt.truncate),
         .delete => try modify.executeDelete(stmt.delete, cxt),
         .update => try modify.executeUpdate(stmt.update, cxt),
-        .begin => try executeBegin(cxt),
-        .commit => try executeCommit(cxt),
-        .rollback => try executeRollback(cxt),
+        .begin => try executeBegin(),
+        .commit => try executeCommit(),
+        .rollback => try executeRollback(),
     };
 }
 
@@ -44,18 +45,19 @@ fn executeSelect(
     stmt: Plan.Statement.Select,
     cxt: *Context,
 ) ![]const u8 {
+    const s = Session.get();
     // Initialize the data node
     try initDataNode(stmt.root, cxt);
     // Don't forget to free it at the end
     defer deinitDataNode(stmt.root, cxt);
 
     // Send the descriptor to the client
-    try cxt.s.sender.send(.{ .tuple_descriptor = stmt.root.descr });
+    try s.sender.send(.{ .tuple_descriptor = stmt.root.descr });
 
     // Fetch tuples one by one
     while (try execDataNode(stmt.root, cxt)) |tuple| {
         // And send them to the client
-        try cxt.s.sender.send(.{ .tuple = tuple });
+        try s.sender.send(.{ .tuple = tuple });
     }
 
     // No success message
@@ -63,22 +65,24 @@ fn executeSelect(
 }
 
 /// Execute a BEGIN statement
-fn executeBegin(cxt: *Context) ![]const u8 {
+fn executeBegin() ![]const u8 {
+    const s = Session.get();
     // Make sure we're not in a transaction
-    if (cxt.s.explicit_transaction != .inactive) {
+    if (s.explicit_transaction != .inactive) {
         Logger.err("Already in transaction", .{});
         return Error.ExecutionError;
     }
-    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
-    cxt.s.explicit_transaction = .active;
+    try s.shared.transaction_log.startRealTransaction(&s.current_tid);
+    s.explicit_transaction = .active;
 
     return "BEGIN";
 }
 
 /// Execute a COMMIT statement
-fn executeCommit(cxt: *Context) ![]const u8 {
+fn executeCommit() ![]const u8 {
+    const s = Session.get();
     // Make sure we're in an active transaction
-    switch (cxt.s.explicit_transaction) {
+    switch (s.explicit_transaction) {
         .active => {},
         .inactive => {
             Logger.err("Not in transaction", .{});
@@ -90,18 +94,19 @@ fn executeCommit(cxt: *Context) ![]const u8 {
         },
     }
 
-    try cxt.s.shared.transaction_log.endTransaction(cxt.s.current_tid, .committed);
-    cxt.s.current_tid = .virtual;
-    cxt.s.explicit_transaction = .inactive;
-    try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
+    try s.shared.transaction_log.endTransaction(s.current_tid, .committed);
+    s.current_tid = .virtual;
+    s.explicit_transaction = .inactive;
+    try s.shared.lock_manager.unlockAll(s.thread_id);
 
     return "COMMIT";
 }
 
 /// Execute a ROLLBACK statement
-fn executeRollback(cxt: *Context) ![]const u8 {
+fn executeRollback() ![]const u8 {
+    const s = Session.get();
     // Make sure we're in a transaction
-    switch (cxt.s.explicit_transaction) {
+    switch (s.explicit_transaction) {
         .active, .broken => {},
         .inactive => {
             Logger.err("Not in transaction", .{});
@@ -109,10 +114,10 @@ fn executeRollback(cxt: *Context) ![]const u8 {
         },
     }
 
-    try cxt.s.shared.transaction_log.endTransaction(cxt.s.current_tid, .aborted);
-    cxt.s.current_tid = .virtual;
-    cxt.s.explicit_transaction = .inactive;
-    try cxt.s.shared.lock_manager.unlockAll(cxt.s.thread_id);
+    try s.shared.transaction_log.endTransaction(s.current_tid, .aborted);
+    s.current_tid = .virtual;
+    s.explicit_transaction = .inactive;
+    try s.shared.lock_manager.unlockAll(s.thread_id);
 
     return "ROLLBACK";
 }

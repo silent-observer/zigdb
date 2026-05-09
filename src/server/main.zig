@@ -26,8 +26,9 @@ fn handleConnection(
         .shared = shared_state,
         .sender = undefined,
     };
+    session.register();
 
-    var server = zigdb.Server.init(io, gpa, client_stream, session);
+    var server = zigdb.Server.init(io, gpa, client_stream);
     defer server.deinit();
     server.loop() catch |e| {
         std.debug.print("Disconnected: {}\n", .{e});

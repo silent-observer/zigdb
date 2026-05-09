@@ -11,19 +11,21 @@ const common = @import("common");
 const scalar = @import("scalar.zig");
 const Executor = @import("Executor.zig");
 const oom = common.oom;
+const Session = @import("../Session.zig");
 
 /// Execute INSERT statement
 pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
+    const s = Session.get();
     // We need a real transaction to write data
-    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try s.shared.transaction_log.startRealTransaction(&s.current_tid);
     // Get a write lock on the table
-    try cxt.s.shared.lock_manager.lock(
+    try s.shared.lock_manager.lock(
         .{ .table = .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         } },
         .write,
-        cxt.s.thread_id,
+        s.thread_id,
     );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
@@ -35,9 +37,9 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         // And insert them into the output table
         _ = try heap.Table.init(
-            cxt.s.shared.storage_cache,
+            s.shared.storage_cache,
             .{
-                .db = cxt.s.db_id,
+                .db = s.db_id,
                 .table = stmt.table,
             },
         ).addOneTuple(tuple);
@@ -49,16 +51,17 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
 
 /// Execute DELETE statement
 pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) ![]const u8 {
+    const s = Session.get();
     // We need a real transaction to write data
-    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try s.shared.transaction_log.startRealTransaction(&s.current_tid);
     // Get a write lock on the table
-    try cxt.s.shared.lock_manager.lock(
+    try s.shared.lock_manager.lock(
         .{ .table = .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         } },
         .write,
-        cxt.s.thread_id,
+        s.thread_id,
     );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
@@ -70,12 +73,12 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) ![]const u8 {
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         // And delete them from the table
         try heap.Table.init(
-            cxt.s.shared.storage_cache,
+            s.shared.storage_cache,
             .{
-                .db = cxt.s.db_id,
+                .db = s.db_id,
                 .table = stmt.table,
             },
-        ).deleteTupleAt(tuple.extended().pos, cxt.s.current_tid.real);
+        ).deleteTupleAt(tuple.extended().pos, s.current_tid.real);
         counter += 1;
     }
 
@@ -84,16 +87,17 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) ![]const u8 {
 
 /// Execute UPDATE statement
 pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
+    const s = Session.get();
     // We need a real transaction to write data
-    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    try s.shared.transaction_log.startRealTransaction(&s.current_tid);
     // Get a write lock on the table
-    try cxt.s.shared.lock_manager.lock(
+    try s.shared.lock_manager.lock(
         .{ .table = .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         } },
         .write,
-        cxt.s.thread_id,
+        s.thread_id,
     );
     // Initialize the source data node
     try Executor.initDataNode(stmt.root, cxt);
@@ -111,12 +115,12 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
     var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         const table_id = ids.FullTableId{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         };
         // Delete them from the table
-        try heap.Table.init(cxt.s.shared.storage_cache, table_id)
-            .deleteTupleAt(tuple.extended().pos, cxt.s.current_tid.real);
+        try heap.Table.init(s.shared.storage_cache, table_id)
+            .deleteTupleAt(tuple.extended().pos, s.current_tid.real);
         // Fill the temporary tuple with them
         for (0..tuple.len()) |i| {
             temp_tuple[i] = tuple.getValue(i);
@@ -131,13 +135,13 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
             b.pushValue(v);
         }
         b.addExtended(.{
-            .xmin = cxt.s.current_tid.real,
+            .xmin = s.current_tid.real,
             .xmax = .invalid,
             .pos = .none,
         });
         const new_tuple = b.finalize();
         // Insert it back into the table
-        _ = try heap.Table.init(cxt.s.shared.storage_cache, table_id)
+        _ = try heap.Table.init(s.shared.storage_cache, table_id)
             .addOneTuple(new_tuple);
         counter += 1;
     }
@@ -146,21 +150,22 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
 }
 
 /// Execute TRUNCATE statement
-pub fn executeTruncate(stmt: Plan.Statement.Truncate, cxt: *Context) ![]const u8 {
+pub fn executeTruncate(stmt: Plan.Statement.Truncate) ![]const u8 {
+    const s = Session.get();
     // Get an exclusive lock on the table
-    try cxt.s.shared.lock_manager.lock(
+    try s.shared.lock_manager.lock(
         .{ .table = .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         } },
         .exclusive,
-        cxt.s.thread_id,
+        s.thread_id,
     );
     // Perform actual truncation
     try heap.Table.init(
-        cxt.s.shared.storage_cache,
+        s.shared.storage_cache,
         .{
-            .db = cxt.s.db_id,
+            .db = s.db_id,
             .table = stmt.table,
         },
     ).truncate();
