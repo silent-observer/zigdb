@@ -81,12 +81,21 @@ async def main():
     os.makedirs('tests/results', exist_ok=True)
 
     with open('tests/regression.diff', 'w') as file:
+        errors = 0
+        total = 0
         for test in schedule:
             diff = await run_test(test)
-            result = 'ok' if len(diff) == 0 else 'FAILED'
+            result = '\033[32mok\033[0m' if len(diff) == 0 else '\033[31mFAILED\033[0m'
             print(f'{test:<10} : {result}')
             file.write(diff)
             file.flush()
+            total += 1
+            if len(diff) > 0:
+                errors += 1
+        if errors > 0:
+            print(f'{errors} tests out of {total} failed')
+        else:
+            print(f'All {total} successful')
 
 if __name__ == "__main__":
     asyncio.run(main())
