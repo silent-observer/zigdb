@@ -1,0 +1,55 @@
+> create table t (i int);
+CREATE TABLE
+> insert into t values (1), (2), (3);
+INSERT 3
+
+1> begin;
+BEGIN
+2> begin;
+BEGIN
+3> begin;
+BEGIN
+4> begin;
+BEGIN
+
+1> truncate t;
+TRUNCATE
+2&> select i from t;
+...waiting...
+3&> truncate t;
+...waiting...
+4&> insert into t values (4);
+...waiting...
+
+2&> ...still waiting...
+3&> ...still waiting...
+4&> ...still waiting...
+
+1> commit;
+COMMIT
+2W>
+ i 
+---
+(0 rows)
+
+3&> ...still waiting...
+4W>
+INSERT 1
+
+2> commit;
+COMMIT
+4> commit;
+COMMIT
+3W>
+TRUNCATE
+
+3> commit;
+COMMIT
+
+> select i from t;
+ i 
+---
+(0 rows)
+
+> drop table t;
+DROP TABLE

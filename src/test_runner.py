@@ -5,6 +5,7 @@ import shutil
 import difflib
 import asyncio
 import random
+import re
 
 def parse_schedule(schedule: str):
     tests = []
@@ -13,6 +14,19 @@ def parse_schedule(schedule: str):
         if label == 'test':
             tests.append(name.strip())
     return tests
+
+async def start_client(port: int) -> asyncio.subprocess.Process:
+    client = await asyncio.subprocess.create_subprocess_exec(
+            "zig-out/bin/client",
+            "-p", str(port),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE
+        )
+    assert client.stdin is not None
+    assert client.stdout is not None
+
+    await read_until_prompt(client.stdout)
+    return client
 
 async def read_until_prompt(stdout: asyncio.StreamReader) -> str:
     output = ''
@@ -41,32 +55,75 @@ async def run_test(test: str) -> str:
             stderr=asyncio.subprocess.DEVNULL
         )
 
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.5)
 
-        client = await asyncio.subprocess.create_subprocess_exec(
-            "zig-out/bin/client",
-            "-p", str(port),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE
-        )
-        assert client.stdin is not None
-        assert client.stdout is not None
-
-        await read_until_prompt(client.stdout)
+        clients = dict()
+        clients[0] = await start_client(port)
 
         try:
             for line in input_file:
                 if line.strip() == '':
+                    result_file.write(f'\n')
                     continue
-                result_file.write('> ' + line)
-                result_file.flush()
-                client.stdin.write((line.strip() + '\n').encode())
-                output = await read_until_prompt(client.stdout)
-                result_file.write(output)
-                result_file.flush()
+                
+                client_id = 0
+                background = False
+                background_check = False
+                wait = False
+                sql = line.strip() + '\n'
+
+                match = re.match(r'^([0-9]+)([W&]?):(.*)$', line)
+                
+                if match:
+                    client_id = int(match.group(1))
+                    if client_id not in clients:
+                        clients[client_id] = await start_client(port)
+                    
+                    if match.group(2) == '&':
+                        background = True
+                    elif match.group(2) == 'W':
+                        wait = True
+
+                    sql = match.group(3).strip() + '\n'
+                    if background and sql == '\n':
+                        background_check = True
+                
+                client = clients[client_id]
+
+                if wait:
+                    result_file.write(f'{client_id}W>\n')
+                    result_file.flush()
+                else:
+                    if client_id > 0 or background:
+                        bg = '&' if background else ''
+                        if background_check:
+                            sql = ''
+                        result_file.write(f'{client_id}{bg}> {sql}')
+                    else:
+                        result_file.write(f'> {sql}')
+                    result_file.flush()
+                    if not background_check:
+                        client.stdin.write(sql.encode())
+
+                if background:
+                    await asyncio.sleep(0.1)
+                    if background_check:
+                        if len(client.stdout._buffer) == 0:
+                            result_file.write('...still waiting...\n')
+                        else:
+                            result_file.write('Got something!\n')
+                    else:
+                        result_file.write('...waiting...\n')
+                    result_file.flush()
+                else:
+                    output = await read_until_prompt(client.stdout)
+                    result_file.write(output)
+                    result_file.flush()
+
         finally:
-            client.stdin.write(b'exit\n')
-            await client.wait()
+            for client in clients.values():
+                client.stdin.write(b'exit\n')
+                await client.wait()
             server.kill()
 
     with (
