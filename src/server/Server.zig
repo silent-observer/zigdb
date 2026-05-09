@@ -3,6 +3,7 @@
 const std = @import("std");
 const common = @import("common");
 const Session = @import("Session.zig");
+const Logger = @import("Logger.zig");
 
 const Server = @This();
 
@@ -18,17 +19,19 @@ network_out_buffer: []u8,
 network_reader: std.Io.net.Stream.Reader,
 network_writer: std.Io.net.Stream.Writer,
 
-/// Initialize the server side of the connection.
+/// Initialize the server side of the connection. Also sets the sender in session
 pub fn init(
     io: std.Io,
     gpa: std.mem.Allocator,
     stream: std.Io.net.Stream,
     session: Session,
-) Server {
+) *Server {
     const network_in_buffer = gpa.alloc(u8, 1024) catch common.oom();
     const network_out_buffer = gpa.alloc(u8, 1024) catch common.oom();
 
-    return Server{
+    const s = gpa.create(Server) catch common.oom();
+
+    s.* = Server{
         .gpa = gpa,
         .arena = .init(gpa),
         .session = session,
@@ -39,6 +42,10 @@ pub fn init(
         .network_reader = stream.reader(io, network_in_buffer),
         .network_writer = stream.writer(io, network_out_buffer),
     };
+
+    s.session.sender = .{ .writer = &s.network_writer.interface };
+
+    return s;
 }
 
 /// Deinitialize the server side.
@@ -46,11 +53,16 @@ pub fn deinit(self: *Server) void {
     self.arena.deinit();
     self.gpa.free(self.network_in_buffer);
     self.gpa.free(self.network_out_buffer);
+    self.gpa.destroy(self);
 }
 
 /// Main message handling loop.
 pub fn loop(self: *Server) !void {
     const ready_msg: common.network.Message = .ready;
+
+    Logger.register(self.session.shared.logger, &self.session);
+    defer Logger.unregister();
+
     try ready_msg.write(&self.network_writer.interface);
     try self.network_writer.interface.flush();
 
@@ -73,17 +85,11 @@ pub fn loop(self: *Server) !void {
 
 /// Handle one message received from the client
 fn handleMessage(self: *Server, m: common.network.Message) !bool {
-    // std.debug.print("Got {}\n", .{m});
     switch (m) {
         // We got a new query to execute
         .query => |q| {
-            // Convenience sender
-            const sender = common.network.Message.Sender{
-                .writer = &self.network_writer.interface,
-            };
-
-            try self.session.executeStmt(q, sender);
-            try sender.send(.ready);
+            try self.session.executeStmt(q);
+            try self.session.sender.send(.ready);
         },
         // Time to close the connection
         .exit => return true,

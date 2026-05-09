@@ -13,6 +13,7 @@ const filter = @import("filter.zig");
 const common = @import("common");
 const heap = @import("../heap.zig");
 const oom = common.oom;
+const Logger = @import("../Logger.zig");
 
 pub const Executor = @This();
 pub const Error = error{
@@ -49,12 +50,12 @@ fn executeSelect(
     defer deinitDataNode(stmt.root, cxt);
 
     // Send the descriptor to the client
-    try cxt.sender.send(.{ .tuple_descriptor = stmt.root.descr });
+    try cxt.s.sender.send(.{ .tuple_descriptor = stmt.root.descr });
 
     // Fetch tuples one by one
     while (try execDataNode(stmt.root, cxt)) |tuple| {
         // And send them to the client
-        try cxt.sender.send(.{ .tuple = tuple });
+        try cxt.s.sender.send(.{ .tuple = tuple });
     }
 
     // No success message
@@ -65,7 +66,7 @@ fn executeSelect(
 fn executeBegin(cxt: *Context) ![]const u8 {
     // Make sure we're not in a transaction
     if (cxt.s.explicit_transaction != .inactive) {
-        try cxt.sender.log(cxt.alloc, "ERROR: already in transaction", .{});
+        Logger.err("Already in transaction", .{});
         return Error.ExecutionError;
     }
     try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
@@ -80,11 +81,11 @@ fn executeCommit(cxt: *Context) ![]const u8 {
     switch (cxt.s.explicit_transaction) {
         .active => {},
         .inactive => {
-            try cxt.sender.log(cxt.alloc, "ERROR: not in transaction", .{});
+            Logger.err("Not in transaction", .{});
             return Error.ExecutionError;
         },
         .broken => {
-            try cxt.sender.log(cxt.alloc, "ERROR: cannot commit because of previous errors", .{});
+            Logger.err("Cannot commit because of previous errors", .{});
             return Error.ExecutionError;
         },
     }
@@ -103,7 +104,7 @@ fn executeRollback(cxt: *Context) ![]const u8 {
     switch (cxt.s.explicit_transaction) {
         .active, .broken => {},
         .inactive => {
-            try cxt.sender.log(cxt.alloc, "ERROR: not in transaction", .{});
+            Logger.err("Not in transaction", .{});
             return Error.ExecutionError;
         },
     }
@@ -125,11 +126,7 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
         .filter => filter.init(plan, cxt),
     };
     r catch |err| {
-        cxt.sender.log(
-            cxt.alloc,
-            "ERROR: {} during Plan init",
-            .{err},
-        ) catch {};
+        Logger.err("{} during Plan init", .{err});
         return Error.ExecutionError;
     };
 }
@@ -153,11 +150,7 @@ pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple 
         .filter => filter.next(plan, cxt),
     };
     return r catch |err| {
-        cxt.sender.log(
-            cxt.alloc,
-            "ERROR: {} during execution",
-            .{err},
-        ) catch {};
+        Logger.err("{} during execution", .{err});
         return Error.ExecutionError;
     };
 }

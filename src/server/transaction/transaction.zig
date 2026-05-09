@@ -6,6 +6,13 @@ const ids = @import("common").ids;
 pub const Id = union(enum) {
     real: ids.RealTransactionId,
     virtual: void,
+
+    pub fn jsonStringify(self: Id, jws: anytype) !void {
+        switch (self) {
+            .virtual => try jws.write("virtual"),
+            .real => |r| try jws.write(r.v),
+        }
+    }
 };
 
 /// Status of some transaction

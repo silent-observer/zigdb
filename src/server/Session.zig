@@ -12,6 +12,7 @@ const planner = @import("planner.zig");
 const lock = @import("lock.zig");
 const Executor = @import("executor/Executor.zig");
 const VariablesCache = @import("VariablesCache.zig");
+const Logger = @import("Logger.zig");
 
 const Lexer = @import("sql/Lexer.zig");
 const Parser = @import("sql/Parser.zig");
@@ -33,6 +34,8 @@ current_tid: transaction.Id,
 thread_id: std.Thread.Id,
 /// Status of an explicit transaction.
 explicit_transaction: transaction.ExplicitStatus = .inactive,
+/// Message sender for client connection.
+sender: common.network.Message.Sender, // Message sender
 /// Shared state, this is memory shared between all threads.
 shared: Shared,
 
@@ -45,19 +48,17 @@ pub const Shared = struct {
     lock_manager: *lock.Manager,
     /// Cache of various global variables
     variables_cache: *VariablesCache,
+    /// Shared part of the logger
+    logger: *Logger.Shared,
 };
 
 /// Execute a single statement
-pub fn executeStmt(
-    s: *Session,
-    query: []const u8,
-    sender: common.network.Message.Sender,
-) !void {
+pub fn executeStmt(s: *Session, query: []const u8) !void {
     // Temporary arena for this statement
     var arena = std.heap.ArenaAllocator.init(s.gpa);
     defer arena.deinit();
 
-    std.debug.print("{s}\n", .{query});
+    Logger.log("Statement: {s}\n", .{query});
 
     const catalog_snapshot = try transaction.Snapshot.create(
         s.shared.transaction_log,
@@ -65,69 +66,42 @@ pub fn executeStmt(
         arena.allocator(),
     );
     s.catalog_cache.rebuild(&catalog_snapshot) catch |e| {
-        try sender.log(
-            arena.allocator(),
-            "Couldn't build catalog cache: {}\n",
-            .{e},
-        );
-        try sender.send(.err);
+        Logger.err("Couldn't build catalog cache: {}\n", .{e});
+        try s.sender.send(.err);
         return;
     };
 
     // Lex the query
     var parser = Parser.init(arena.allocator());
-    if (parser.lex(query)) |err| {
-        try sender.log(
-            arena.allocator(),
-            "ERROR: {}",
-            .{err},
-        );
-        try sender.send(.err);
+    if (parser.lex(query)) |e| {
+        Logger.err("{}", .{e});
+        try s.sender.send(.err);
         return;
     }
 
     // Parse the query
     const stmt = parser.parse();
-    for (parser.errors.items) |err| {
-        try sender.log(
-            arena.allocator(),
-            "ERROR: {s}",
-            .{err},
-        );
+    for (parser.errors.items) |e| {
+        Logger.err("{s}", .{e});
     }
     if (parser.errors.items.len > 0) {
-        try sender.send(.err);
+        try s.sender.send(.err);
         return;
     }
 
-    {
-        const formatted = std.json.fmt(
-            stmt,
-            .{ .whitespace = .indent_2 },
-        );
-        std.debug.print("{f}\n", .{formatted});
-    }
+    Logger.printPayload(.log, "AST", .{}, stmt);
 
     // Plan the parsed query
     var pl = Planner.init(arena.allocator(), s.catalog_cache);
     const plan = pl.plan(stmt) catch {
-        for (pl.errors.items) |err| {
-            try sender.log(
-                arena.allocator(),
-                "ERROR: {s}",
-                .{err},
-            );
+        for (pl.errors.items) |e| {
+            Logger.log("{s}", .{e});
         }
-        try sender.send(.err);
+        try s.sender.send(.err);
         return;
     };
 
-    // std.debug.print("Successfully planned\n", .{});
-    // const formatted = std.json.fmt(
-    //     plan,
-    //     .{ .whitespace = .indent_2 },
-    // );
-    // std.debug.print("{f}\n", .{formatted});
+    Logger.printPayload(.log, "Plan", .{}, plan);
 
     {
         errdefer if (s.explicit_transaction == .inactive) {
@@ -152,18 +126,13 @@ pub fn executeStmt(
             .alloc = arena.allocator(),
             .s = s,
             .snapshot = &snapshot,
-            .sender = sender,
         };
         // Execute the query
-        const message = Executor.execute(plan, &cxt) catch |err| {
-            if (err != Executor.Error.ExecutionError) {
-                try sender.log(
-                    arena.allocator(),
-                    "ERROR: {}",
-                    .{err},
-                );
+        const message = Executor.execute(plan, &cxt) catch |e| {
+            if (e != Executor.Error.ExecutionError) {
+                Logger.err("{}", .{e});
             }
-            try sender.send(.err);
+            try s.sender.send(.err);
             if (s.explicit_transaction == .active)
                 s.explicit_transaction = .broken;
             return;
@@ -181,6 +150,6 @@ pub fn executeStmt(
         try s.shared.storage_cache.flush(false);
 
         // Send the success message
-        try sender.send(.{ .success = message });
+        try s.sender.send(.{ .success = message });
     }
 }

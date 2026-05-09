@@ -93,7 +93,7 @@ pub fn loop(self: *Client) !void {
 fn handleMessage(self: *Client, m: common.network.Message) !bool {
     const stdout = &self.stdout_writer.interface;
     switch (m) {
-        .err => try stdout.print("Error!\n", .{}),
+        .err => {},
         .success => |s| if (self.table.descr != null)
             try stdout.print("{f}", .{self.table})
         else

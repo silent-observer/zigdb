@@ -175,7 +175,6 @@ pub const Message = union(Tag) {
         writer: *std.Io.Writer,
 
         pub fn send(self: Sender, msg: Message) !void {
-            // std.debug.print("Sent {}\n", .{msg});
             try msg.write(self.writer);
             // Don't forget to flush or the message won't get sent
             try self.writer.flush();

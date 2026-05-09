@@ -62,8 +62,6 @@ pub fn open(io: Io, base_path: []const u8, id: Id) !RawDataFile {
         filename,
         .{ .truncate = false, .read = true },
     );
-    const n = try f.realPath(io, &buf);
-    std.debug.print("{s}\n", .{buf[0..n]});
     return .{
         .io = io,
         .file = f,

@@ -24,6 +24,7 @@ fn handleConnection(
         .current_tid = .virtual,
         .thread_id = std.Thread.getCurrentId(),
         .shared = shared_state,
+        .sender = undefined,
     };
 
     var server = zigdb.Server.init(io, gpa, client_stream, session);
@@ -54,16 +55,13 @@ pub fn main(init: std.process.Init) !void {
     defer tcp_server.deinit(init.io);
 
     // Create the temporary data directory (for testing)
-    std.Io.Dir.createDirAbsolute(
+    try std.Io.Dir.cwd().createDirPath(init.io, "/tmp/datadir/logs");
+
+    var logger = try zigdb.Logger.Shared.init(
         init.io,
-        "/tmp/datadir",
-        std.Io.File.Permissions.default_dir,
-    ) catch |err| {
-        switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        }
-    };
+        init.gpa,
+        try std.Io.Dir.cwd().openDir(init.io, "/tmp/datadir/logs", .{}),
+    );
 
     // Initialize the catalog table descriptors
     zigdb.catalog.tables.init(init.arena.allocator());
@@ -103,6 +101,7 @@ pub fn main(init: std.process.Init) !void {
         .transaction_log = &transaction_log,
         .lock_manager = &lock_manager,
         .variables_cache = &variables_cache,
+        .logger = &logger,
     };
 
     //try catalog_cache.rebuild();

@@ -5,6 +5,7 @@
 const std = @import("std");
 const common = @import("common");
 const ids = common.ids;
+const Logger = @import("Logger.zig");
 
 /// The type of lock to be taken.
 pub const Mode = enum {
@@ -26,6 +27,15 @@ pub const Mode = enum {
 /// The object being locked. Currently only tables are supported.
 pub const Id = union(enum) {
     table: ids.FullTableId,
+
+    pub fn format(
+        self: Id,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .table => |t| try writer.print("table({f})", .{t}),
+        }
+    }
 };
 
 /// Information about a single locked object.
@@ -266,7 +276,7 @@ pub const Manager = struct {
         if (l.findGranted(me)) |tl| {
             // We already have some locks here, just add a new one
             tl.modes.setPresent(mode, true);
-            std.debug.print("{}: Additionally got {} lock on {}\n", .{ me, mode, id });
+            Logger.log("Additionally got {} lock on {f}", .{ mode, id });
         } else {
             // We have to add a new entry to the lock list
             const tl = self.thread_lock_pool.create(undefined) catch unreachable;
@@ -307,7 +317,7 @@ pub const Manager = struct {
 
         // Can we immediately grant this lock without waiting?
         if (canGrant(l, mode, me, .empty)) {
-            std.debug.print("{}: Immediately got {} lock on {}\n", .{ me, mode, id });
+            Logger.log("Immediately got {} lock on {f}", .{ mode, id });
             self.grant(l, id, mode, me);
             return;
         } else {
@@ -331,7 +341,7 @@ pub const Manager = struct {
                 ti.value_ptr.waiting_lock = id;
             }
 
-            std.debug.print("{}: Waiting for {} lock on {}\n", .{ me, mode, id });
+            Logger.log("Waiting for {} lock on {f}", .{ mode, id });
             // Have to do this in a loop because of accidental wake ups
             while (true) {
                 // Waiting temporarily unlocks the mutex, so all the
@@ -356,7 +366,7 @@ pub const Manager = struct {
             }
 
             std.debug.assert(canGrant(l, mode, me, .empty));
-            std.debug.print("{}: Got {} lock on {}\n", .{ me, mode, id });
+            Logger.log("Got {} lock on {f}", .{ mode, id });
             self.grant(l, id, mode, me);
             return;
         }
@@ -379,7 +389,7 @@ pub const Manager = struct {
         while (tl_node) |n| {
             tl_node = n.next;
             const tl: *ThreadLock = @fieldParentPtr("per_thread_node", n);
-            std.debug.print("{}: Starting to unlock {}\n", .{ me, tl.lock });
+            Logger.log("Starting to unlock {f}", .{tl.lock});
 
             // This is a lock we currently hold
             const l = self.locks.get(tl.lock).?;
@@ -403,7 +413,7 @@ pub const Manager = struct {
                 // Can we grant them this lock?
                 if (canGrant(l, candidate.mode, candidate.thread, additional_granted_modes)) {
                     // We can, mark them as finished waiting
-                    std.debug.print("{}: Waking up {}\n", .{ me, candidate.thread });
+                    Logger.log("Waking up {}", .{candidate.thread});
                     self.threads.getPtr(candidate.thread).?.waiting_lock = null;
                     // Also add this mode to the potential granted set, to ensure
                     // next candidates don't conflict with this mode.
@@ -418,12 +428,12 @@ pub const Manager = struct {
             // Is there no one who needs this Lock anymore?
             if (l.granted_list.first == null and l.waiting_list.first == null) {
                 // We can delete it
-                std.debug.print("{}: Removed lock {}\n", .{ me, tl.lock });
+                Logger.log("Removed lock {f}", .{tl.lock});
                 _ = self.locks.swapRemove(tl.lock);
                 self.lock_pool.destroy(l);
             }
 
-            std.debug.print("{}: Done unlocking {}\n", .{ me, tl.lock });
+            Logger.log("Done unlocking {f}", .{tl.lock});
 
             // We can delete the ThreadLock node
             self.thread_lock_pool.destroy(tl);
@@ -431,6 +441,6 @@ pub const Manager = struct {
 
         // And we can delete the ThreadInfo too
         _ = self.threads.swapRemove(me);
-        std.debug.print("{}: Done unlocking\n", .{me});
+        Logger.log("Done unlocking", .{});
     }
 };

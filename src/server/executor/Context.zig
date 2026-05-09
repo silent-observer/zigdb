@@ -13,8 +13,6 @@ alloc: std.mem.Allocator, // Allocator for tuples
 s: *Session, // Common session data
 snapshot: *const transaction.Snapshot, // Current snapshot
 
-sender: common.network.Message.Sender, // Message sender
-
 pub const Error = error{
     MalformedData,
 };

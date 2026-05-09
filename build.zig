@@ -10,12 +10,18 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const zeit = b.dependency("zeit", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Main library module for the server
     const mod = b.addModule("zigdb", .{
         .root_source_file = b.path("src/server/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "common", .module = common },
+            .{ .name = "zeit", .module = zeit.module("zeit") },
         },
     });
 
