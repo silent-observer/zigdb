@@ -315,8 +315,23 @@ pub fn Table(comptime id: tables.TableId) type {
                 }).updateInPlace(tuple);
 
                 // Replace the tuple in the cache
-                self.table.data.items[self.index].deinit(self.table.arena.allocator());
-                self.table.data.items[self.index] = tuple;
+                self.table.data.items[self.index - 1].deinit(self.table.arena.allocator());
+                self.table.data.items[self.index - 1] = tuple;
+            }
+
+            /// Delete the last Row returned by the Scanner
+            pub fn deleteLast(self: *Scanner, cache: *storage.Cache, tid: ids.RealTransactionId) !void {
+                // Delete the tuple in the heap table
+                try heap.Table.init(cache, .{
+                    .db = self.table.db_id,
+                    .table = @intFromEnum(id),
+                }).deleteTupleAt(self.last_pos, tid);
+
+                // Undo the index increment
+                self.index -= 1;
+                // Delete the tuple in the cache
+                const tuple = self.table.data.orderedRemove(self.index);
+                tuple.deinit(self.table.arena.allocator());
             }
         };
 

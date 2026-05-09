@@ -3,3 +3,4 @@ insert into t values (1, 'hello', true), (2, 'world', false), (null, 'null', nul
 select i, t, flag from t;
 select i, t, flag from t where i > 1;
 select i, t, flag from t where i is not null;
+drop table t;

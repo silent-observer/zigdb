@@ -162,6 +162,7 @@ pub fn parse(p: *Parser) ast.Statement {
 ///           | Delete
 ///           | Update
 ///           | Create
+///           | Drop
 ///           | Truncate
 ///           | Begin
 ///           | Commit
@@ -175,6 +176,7 @@ fn parseStmt(p: *Parser) ast.Statement {
         .delete => return p.parseDelete(),
         .update => return p.parseUpdate(),
         .create => return p.parseCreate(),
+        .drop => return p.parseDrop(),
         .truncate => return p.parseTruncate(),
         .begin => return p.parseBegin(),
         .commit => return p.parseCommit(),
@@ -416,6 +418,20 @@ fn parseColumnDefinition(p: *Parser) !ast.Statement.CreateTable.ColumnDefinition
     const name = try p.parseName();
     const dbtype = try p.parseType();
     return .{ .name = name, .col_type = dbtype };
+}
+
+/// Parse a DROP statement. Currently only DROP TABLE supported.
+/// ```
+/// Drop = "DROP" "TABLE" Name ";"
+/// ```
+fn parseDrop(p: *Parser) ast.Statement {
+    p.expectKeyword(.drop) catch return .err;
+    p.expectKeyword(.table) catch return .err;
+    const name = p.parseName() catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .{ .drop_table = .{
+        .name = name,
+    } };
 }
 
 /// Parse a TRUNCATE statement.

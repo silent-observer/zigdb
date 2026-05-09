@@ -45,6 +45,7 @@ pub const Token = struct {
         create,
         table,
         truncate,
+        drop,
         begin,
         commit,
         rollback,

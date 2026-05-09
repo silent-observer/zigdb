@@ -1,5 +1,6 @@
 //! Executors for various DDL statements
 
+const std = @import("std");
 const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const catalog = @import("../catalog.zig");
@@ -66,4 +67,63 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
     ).create();
 
     return "CREATE TABLE";
+}
+
+/// Execute DROP TABLE statement
+pub fn executeDropTable(stmt: Plan.Statement.DropTable, cxt: *Context) ![]const u8 {
+    // We need a real transaction to write data
+    try cxt.s.shared.transaction_log.startRealTransaction(&cxt.s.current_tid);
+    // Get an exclusive lock on the table itself
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = stmt.table,
+        } },
+        .exclusive,
+        cxt.s.thread_id,
+    );
+    // Get a write lock on the catalog tables
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = @intFromEnum(catalog.tables.TableId.zdb_rels),
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
+    try cxt.s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = cxt.s.db_id,
+            .table = @intFromEnum(catalog.tables.TableId.zdb_attrs),
+        } },
+        .write,
+        cxt.s.thread_id,
+    );
+
+    // Scan through the zdb_rels catalog table
+    {
+        var scan = cxt.s.catalog_cache.catalog.zdb_rels.scan(
+            &.{.rel_id},
+            &.{stmt.table},
+        );
+        _ = scan.next().?;
+        try scan.deleteLast(cxt.s.shared.storage_cache, cxt.s.current_tid.real);
+        std.debug.assert(scan.next() == null);
+    }
+
+    // Scan through the zdb_attrs catalog table
+    {
+        var scan = cxt.s.catalog_cache.catalog.zdb_attrs.scan(
+            &.{.attr_rel_id},
+            &.{stmt.table},
+        );
+        while (scan.next()) |_| {
+            try scan.deleteLast(cxt.s.shared.storage_cache, cxt.s.current_tid.real);
+        }
+    }
+
+    // Update all descriptors in the catalog
+    try cxt.s.catalog_cache.updateDescriptors();
+
+    return "DROP TABLE";
 }

@@ -23,3 +23,5 @@ INSERT 3
  2 | world | f    
 (2 rows)
 
+> drop table t;
+DROP TABLE
