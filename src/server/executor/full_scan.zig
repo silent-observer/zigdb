@@ -53,6 +53,13 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     cxt.alloc.destroy(state);
 }
 
+/// Rewind FullScan DataNode to start from the first tuple again
+pub fn rewind(plan: *Plan.DataNode) void {
+    std.debug.assert(plan.action == .full_scan);
+    const state: *State = @ptrCast(@alignCast(plan.state.?));
+    state.scanner.rewind();
+}
+
 /// Fetch one tuple from FullScan DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     std.debug.assert(plan.action == .full_scan);

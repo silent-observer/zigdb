@@ -346,14 +346,9 @@ fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
 
 /// Plan SELECT statement
 fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
-    // We don't support joins yet, so only one input table
-    if (stmt.sources.len != 1) {
-        p.addError("Joins not supported yet", .{});
-        return Error.NotSupported;
-    }
     // Plan the data source for input
-    const source = stmt.sources[0];
-    const input_node = try p.planDataSource(source);
+    const source = stmt.source;
+    const input_node = try p.planDataSource(source, false);
 
     // List of scalar nodes for expressions
     var scalarNodes =
@@ -419,9 +414,9 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     // Plan the data source for input
     const table = try p.findTable(stmt.name);
-    const input_node = try p.planDataSource(.{
+    const input_node = try p.planDataSource(&.{
         .table = .{ .name = stmt.name },
-    });
+    }, true);
 
     // This is the input data
     var root = input_node;
@@ -454,9 +449,9 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
 fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     // Plan the data source for input
     const table = try p.findTable(stmt.name);
-    const input_node = try p.planDataSource(.{
+    const input_node = try p.planDataSource(&.{
         .table = .{ .name = stmt.name },
-    });
+    }, true);
 
     // This is the input data
     var root = input_node;
@@ -507,9 +502,10 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
 
 /// Plan a data source node.
 /// This is currently very simple because almost nothing is supported.
-fn planDataSource(p: *Planner, source: ast.DataSource) Error!*Plan.DataNode {
-    switch (source) {
+fn planDataSource(p: *Planner, source: *const ast.DataSource, need_extended: bool) Error!*Plan.DataNode {
+    switch (source.*) {
         .table => |t| return try p.planFullScan(t),
+        .join => |j| return try p.planNestedLoop(j, need_extended),
         .err => unreachable,
     }
 }
@@ -527,6 +523,69 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
             .table = table_id,
         } },
     });
+}
+
+/// Plan a nested loop join.
+fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) Error!*Plan.DataNode {
+    // Plan children data sources
+    const lhs = try p.planDataSource(join.lhs, need_extended);
+    const rhs = try p.planDataSource(join.rhs, false);
+    // Construct the total tuple descriptor
+    var new_descr = p.make(lhs.descr.clone(p.alloc));
+    new_descr.attrs.ensureUnusedCapacity(
+        p.alloc,
+        rhs.descr.attrs.len,
+    ) catch oom();
+    const slice = rhs.descr.attrs.slice();
+    for (slice.items(.name), slice.items(.t)) |name, t| {
+        new_descr.attrs.appendAssumeCapacity(.{ .name = name, .t = t });
+    }
+    new_descr.has_extended = need_extended;
+    // Plan the join condition
+    const cond = if (join.cond) |c|
+        p.make(try p.planExpression(c.*, new_descr))
+    else
+        null;
+
+    return switch (join.kind) {
+        .cross => p.make(Plan.DataNode{
+            .descr = new_descr,
+            .action = .{ .nested_loop = .{
+                .lhs = lhs,
+                .rhs = rhs,
+                .cond = null,
+                .op = .cross,
+            } },
+        }),
+        .inner => p.make(Plan.DataNode{
+            .descr = new_descr,
+            .action = .{ .nested_loop = .{
+                .lhs = lhs,
+                .rhs = rhs,
+                .cond = cond,
+                .op = .inner,
+            } },
+        }),
+        .left => p.make(Plan.DataNode{
+            .descr = new_descr,
+            .action = .{ .nested_loop = .{
+                .lhs = lhs,
+                .rhs = rhs,
+                .cond = cond,
+                .op = .left,
+            } },
+        }),
+        .right => p.make(Plan.DataNode{
+            .descr = new_descr,
+            .action = .{ .nested_loop = .{
+                .lhs = rhs,
+                .rhs = lhs,
+                .cond = cond,
+                .op = .left,
+            } },
+        }),
+        .full => @panic("TODO: FULL JOIN not supported yet"),
+    };
 }
 
 /// Plan a data source node for VALUES list

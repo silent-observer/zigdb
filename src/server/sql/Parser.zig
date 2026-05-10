@@ -204,7 +204,7 @@ fn parseSelect(p: *Parser) ast.Statement {
             parseColumnExpression,
         ) catch return .err;
     p.expectKeyword(.from) catch return .err;
-    const sources = p.parseDataSourceList() catch return .err;
+    const source = p.parseDataSourceList();
     const condition = if (p.eat(.{ .keyword = .where }))
         p.make(p.parseExpression())
     else
@@ -212,7 +212,7 @@ fn parseSelect(p: *Parser) ast.Statement {
     p.expectSymbol(.semi) catch return .err;
     return .{ .select = .{
         .columns = columns,
-        .sources = sources,
+        .source = p.make(source),
         .where = condition,
     } };
 }
@@ -328,28 +328,93 @@ fn parseCommaListErr(
     return list.toOwnedSlice(p.alloc) catch oom();
 }
 
-/// Parse a data source list. Currently is simply a comma-separated list.
+/// Parse a data source list. The top level list is just a comma-separated list of atomic data sources
 /// ```
-/// DataSourceList = DataSource ("," DataSource)*
+/// DataSourceList = JoinDataSource ("," JoinDataSource)*
 /// ```
-fn parseDataSourceList(p: *Parser) ![]ast.DataSource {
-    var exprs: std.ArrayList(ast.DataSource) = .empty;
-    exprs.append(p.alloc, try p.parseDataSource()) catch oom();
+fn parseDataSourceList(p: *Parser) ast.DataSource {
+    var lhs = p.parseDataSource();
     while (p.eat(.{ .symbol = .comma })) {
-        exprs.append(p.alloc, try p.parseDataSource()) catch oom();
+        const new = ast.DataSource{ .join = .{
+            .kind = .cross,
+            .lhs = p.make(lhs),
+            .rhs = p.make(p.parseDataSource()),
+            .cond = null,
+        } };
+        lhs = new;
     }
-    return exprs.toOwnedSlice(p.alloc);
+    return lhs;
 }
 
-/// Parse a data source. Currently only table names are supported.
+/// Parse a data source.
 /// ```
-/// DataSource = Name
+/// DataSource = AtomicDataSource (JoinOp AtomicDataSource "ON" Expression)*
+/// JoinOp = "INNER"? "JOIN"
+///        | "LEFT" "JOIN"
+///        | "RIGHT" "JOIN"
+///        | "FULL" "JOIN"
 /// ```
-fn parseDataSource(p: *Parser) !ast.DataSource {
-    const name = try p.parseName();
-    return .{ .table = .{ .name = name } };
+fn parseDataSource(p: *Parser) ast.DataSource {
+    var lhs = p.parseAtomicDataSource();
+    while (true) {
+        const kind: ast.DataSource.Join.Kind = if (p.peek().keyword()) |kw| switch (kw) {
+            .inner, .join => .inner,
+            .left => .left,
+            .right => .right,
+            .full => .full,
+            else => break,
+        } else break;
+
+        switch (p.peek().keyword().?) {
+            .join => {},
+            .inner, .left, .right, .full => p.advance(),
+            else => unreachable,
+        }
+        p.expectKeyword(.join) catch return .err;
+
+        const rhs = p.parseAtomicDataSource();
+        p.expectKeyword(.on) catch return .err;
+        const cond = p.make(p.parseExpression());
+
+        const new = ast.DataSource{ .join = .{
+            .kind = kind,
+            .lhs = p.make(lhs),
+            .rhs = p.make(rhs),
+            .cond = cond,
+        } };
+        lhs = new;
+    }
+    return lhs;
 }
 
+/// Parse an atomic data source: either a table or a parenthesized expression
+/// AtomicDataSource = Name
+///                  | "(" DataSource ")"
+fn parseAtomicDataSource(p: *Parser) ast.DataSource {
+    const t = p.peek();
+    switch (t.kind) {
+        .id => return .{
+            .table = .{ .name = p.parseName() catch return .err },
+        },
+        .symbol => |s| switch (s) {
+            .lparen => {
+                p.advance();
+                const ds = p.parseDataSource();
+                p.expectSymbol(.rparen) catch return .err;
+                return ds;
+            },
+            else => {},
+        },
+        else => {},
+    }
+
+    p.addError(
+        t,
+        "Expected a data source but got \"{s}\"",
+        .{t.text(p.input)},
+    );
+    return .err;
+}
 /// Parse an INSERT statement. Currently only VALUES form is supported.
 /// ```
 /// Insert = "INSERT" "INTO" Name ("(" CommaList(Name) ")")?
@@ -510,7 +575,7 @@ fn parseType(p: *Parser) InternalError!DBType {
 }
 
 /// This parses an expression. Expressions use a Pratt parser
-/// to handle precendence properly through binding power.
+/// to handle precedence properly through binding power.
 /// The general (ambiguous) grammar is the following:
 ///
 /// ```

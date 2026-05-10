@@ -10,6 +10,7 @@ const full_scan = @import("full_scan.zig");
 const values = @import("values.zig");
 const project = @import("project.zig");
 const filter = @import("filter.zig");
+const nested_loop = @import("nested_loop.zig");
 const common = @import("common");
 const heap = @import("../heap.zig");
 const oom = common.oom;
@@ -129,6 +130,7 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
         .values => values.init(plan, cxt),
         .project => project.init(plan, cxt),
         .filter => filter.init(plan, cxt),
+        .nested_loop => nested_loop.init(plan, cxt),
     };
     r catch |err| {
         Logger.err("{} during Plan init", .{err});
@@ -143,7 +145,23 @@ pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
         .values => return values.deinit(plan, cxt),
         .project => return project.deinit(plan, cxt),
         .filter => return filter.deinit(plan, cxt),
+        .nested_loop => return nested_loop.deinit(plan, cxt),
     }
+}
+
+/// Rewind the DataNode, causing it to start from the start of its data.
+pub fn rewindDataNode(plan: *Plan.DataNode) Error!void {
+    const r = switch (plan.action) {
+        .full_scan => full_scan.rewind(plan),
+        .values => values.rewind(plan),
+        .project => project.rewind(plan),
+        .filter => filter.rewind(plan),
+        .nested_loop => nested_loop.rewind(plan),
+    };
+    r catch |err| {
+        Logger.err("{} during Plan rewind", .{err});
+        return Error.ExecutionError;
+    };
 }
 
 /// Fetch one tuple fron data node. Can be used like an iterator.
@@ -153,6 +171,7 @@ pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple 
         .values => values.next(plan, cxt),
         .project => project.next(plan, cxt),
         .filter => filter.next(plan, cxt),
+        .nested_loop => nested_loop.next(plan, cxt),
     };
     return r catch |err| {
         Logger.err("{} during execution", .{err});

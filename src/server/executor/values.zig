@@ -31,6 +31,13 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     cxt.alloc.destroy(state);
 }
 
+/// Rewind Values DataNode to start from the first tuple again
+pub fn rewind(plan: *Plan.DataNode) void {
+    std.debug.assert(plan.action == .values);
+    const state: *State = @ptrCast(@alignCast(plan.state.?));
+    state.index = 0;
+}
+
 /// Fetch one tuple from Values DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) ?common.MemTuple {
     std.debug.assert(plan.action == .values);

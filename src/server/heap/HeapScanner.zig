@@ -131,3 +131,13 @@ pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?MemTuple {
             return result;
     }
 }
+
+/// Rewind the scanner, making it start from the first tuple again.
+pub fn rewind(self: *HeapScanner) void {
+    if (self.page) |p| self.cache.unpin(p);
+    self.page = null;
+    self.parsed_page = null;
+
+    self.page_id = 1;
+    self.tuple_index = 0;
+}

@@ -27,6 +27,13 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     Executor.deinitDataNode(plan.action.filter.input, cxt);
 }
 
+/// Rewind Filter DataNode to start from the first tuple again
+pub fn rewind(plan: *Plan.DataNode) !void {
+    std.debug.assert(plan.action == .filter);
+    // Simply recurse to child
+    try Executor.rewindDataNode(plan.action.filter.input);
+}
+
 /// Fetch one tuple from Filter DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     std.debug.assert(plan.action == .filter);

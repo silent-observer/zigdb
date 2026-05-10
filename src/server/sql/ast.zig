@@ -20,7 +20,7 @@ pub const Statement = union(enum) {
 
     pub const Select = struct {
         columns: []ColumnExpression,
-        sources: []DataSource,
+        source: *DataSource,
         where: ?*Expression,
 
         pub const ColumnExpression = struct {
@@ -120,10 +120,26 @@ pub const Expression = union(enum) {
 
 pub const DataSource = union(enum) {
     table: Table,
+    join: Join,
     err: void,
 
     pub const Table = struct {
         name: Name,
+    };
+
+    pub const Join = struct {
+        kind: Kind,
+        lhs: *DataSource,
+        rhs: *DataSource,
+        cond: ?*Expression,
+
+        pub const Kind = enum {
+            cross,
+            inner,
+            left,
+            right,
+            full,
+        };
     };
 };
 

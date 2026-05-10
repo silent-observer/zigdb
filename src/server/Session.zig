@@ -107,7 +107,7 @@ pub fn executeStmt(query: []const u8) !void {
     var pl = Planner.init(arena.allocator(), s.catalog_cache);
     const plan = pl.plan(stmt) catch {
         for (pl.errors.items) |e| {
-            Logger.log("{s}", .{e});
+            Logger.err("{s}", .{e});
         }
         try s.sender.send(.err);
         return;

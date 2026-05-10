@@ -82,6 +82,7 @@ pub const DataNode = struct {
         values: Values,
         project: Project,
         filter: Filter,
+        nested_loop: NestedLoop,
 
         /// Performs a full scan of some table
         pub const FullScan = struct {
@@ -109,6 +110,25 @@ pub const DataNode = struct {
             input: *DataNode,
             /// Condition to check
             condition: *ScalarNode,
+        };
+
+        /// Performs a join using a nested loop
+        pub const NestedLoop = struct {
+            op: Op,
+            /// Left data source, scanned once
+            lhs: *DataNode,
+            /// Right data source, rescanned for each tuple from lhs
+            rhs: *DataNode,
+            /// Join condition
+            cond: ?*ScalarNode,
+
+            pub const Op = enum {
+                cross, // No condition to check
+                inner, // Only the tuples that pass the condition
+                left, // Same as inner, plus left tuples with no match
+                semi, // All left tuples that have at least one match
+                anti_semi, // All left tuples that have no matches
+            };
         };
     };
 

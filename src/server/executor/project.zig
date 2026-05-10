@@ -27,6 +27,13 @@ pub fn deinit(plan: *Plan.DataNode, cxt: *Context) void {
     Executor.deinitDataNode(plan.action.project.input, cxt);
 }
 
+/// Rewind Project DataNode to start from the first tuple again
+pub fn rewind(plan: *Plan.DataNode) !void {
+    std.debug.assert(plan.action == .project);
+    // Simply recurse to child
+    try Executor.rewindDataNode(plan.action.project.input);
+}
+
 /// Fetch one tuple from Project DataNode
 pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     const s = Session.get();
