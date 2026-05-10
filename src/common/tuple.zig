@@ -51,7 +51,9 @@
 const std = @import("std");
 const ids = @import("ids.zig");
 const t = @import("types.zig");
-const Value = @import("value.zig").Value;
+const value = @import("value.zig");
+const Value = value.Value;
+const Text = value.Text;
 const oom = @import("utils.zig").oom;
 
 /// Pointer to a memory tuple
@@ -234,7 +236,7 @@ pub const MemTuple = struct {
         std.debug.assert(self.dbtype(i).checkType(T));
         return switch (T) {
             u8, u16, u32, u64, i8, i16, i32, i64, bool => std.mem.bytesToValue(T, data),
-            []const u8 => data,
+            Text => Text.fromBytes(data),
             else => comptime unreachable,
         };
     }
@@ -254,25 +256,25 @@ pub const MemTuple = struct {
             .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
-            .text => return .{ .text = .{ .raw = data } },
+            .text => return .{ .text = Text.fromBytes(data) },
             .any => unreachable,
         };
     }
 
     /// Set i-th attribute with a comptime-known type T.
-    /// Danger: only values of the same size are directly settable.
+    /// Danger: only values of fixed size are directly settable.
     pub fn set(self: MemTuple, T: type, i: usize, val: T) void {
         const data = self.dataPtr(i);
         std.debug.assert(self.dbtype(i).checkType(T));
         return switch (T) {
             u8, u16, u32, u64, i8, i16, i32, i64, bool => std.mem.bytesAsValue(T, data).* = val,
-            []const u8 => @memcpy(data, val),
+            Text => comptime unreachable,
             else => comptime unreachable,
         };
     }
 
     /// Set i-th attribute with a runtime-known type.
-    /// Danger: only values of the same size are directly settable.
+    /// Danger: only values of fixed size are directly settable.
     pub fn setValue(self: MemTuple, i: usize, val: Value) void {
         const data: []const u8 = @constCast(self).dataPtr(i);
         std.debug.assert(val.checkType(self.dbtype(i)));
@@ -286,7 +288,7 @@ pub const MemTuple = struct {
             .uint4, .oid => std.mem.bytesAsValue(u32, data).* = @intCast(val.int),
             .uint8 => std.mem.bytesAsValue(u64, data).* = @intCast(val.int),
             .boolean => std.mem.bytesAsValue(bool, data).* = val.boolean,
-            .text => @memcpy(data, val.text),
+            .text => unreachable,
         };
     }
 
@@ -346,14 +348,28 @@ pub const MemTuple = struct {
             b.arr.appendSlice(b.gpa, bytes) catch oom();
         }
 
+        /// Push a Text value into the data section.
+        fn pushText(b: *Builder, text: Text) void {
+            switch (text) {
+                .raw => |r| {
+                    b.offset += @intCast(r.len + 1);
+                    b.index += 1;
+                    std.debug.assert(b.index <= b.tuple().len());
+                    b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
+                    b.arr.append(b.gpa, 0x00) catch oom();
+                    b.arr.appendSlice(b.gpa, r) catch oom();
+                },
+            }
+        }
+
         /// Push a value of comptime-known type T.
         pub fn push(b: *Builder, T: type, val: T) void {
             const i = b.index;
             std.debug.assert(i < b.tuple().len());
             std.debug.assert(b.tuple().dbtype(i).checkType(T));
 
-            if (T == []const u8)
-                b.pushBytes(val)
+            if (T == Text)
+                b.pushText(val)
             else
                 b.pushBytes(std.mem.asBytes(&val));
         }
@@ -372,7 +388,7 @@ pub const MemTuple = struct {
 
             switch (b.tuple().dbtype(i)) {
                 .boolean => b.pushBytes(std.mem.asBytes(&val.boolean)),
-                .text => b.pushBytes(val.text.raw),
+                .text => b.pushText(val.text),
 
                 .int1 => {
                     const x: i8 = @intCast(val.int);

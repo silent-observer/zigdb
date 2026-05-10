@@ -3,13 +3,30 @@ const t = @import("types.zig");
 const oom = @import("utils.zig").oom;
 
 /// Text is a special type, because it always starts with a 0 byte to distinguish from NULL
-pub const Text = struct {
+pub const Text = union(enum) {
     raw: []const u8,
-    pub fn text(self: Text) []const u8 {
-        return self.raw[1..];
+
+    pub fn fromBytes(bytes: []const u8) Text {
+        return switch (bytes[0]) {
+            0x00 => .{ .raw = bytes[1..] },
+            else => unreachable,
+        };
     }
+
+    pub fn makeRaw(str: []const u8) Text {
+        return .{ .raw = str };
+    }
+
+    pub fn text(self: Text) []const u8 {
+        switch (self) {
+            .raw => |r| return r,
+        }
+    }
+
     pub fn len(self: Text) usize {
-        return self.raw.len - 1;
+        switch (self) {
+            .raw => |r| return r.len,
+        }
     }
 };
 

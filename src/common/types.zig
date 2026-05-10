@@ -1,6 +1,7 @@
 const std = @import("std");
 const oom = @import("utils.zig").oom;
 const ObjectId = @import("ids.zig").ObjectId;
+const Text = @import("value.zig").Text;
 
 /// A possible type of a value in the database
 pub const DBType = enum(u32) {
@@ -99,7 +100,7 @@ pub const DBType = enum(u32) {
             .int4 => T == i32,
             .int8 => T == i64,
             .boolean => T == bool,
-            .text => T == []const u8,
+            .text => T == Text,
             .any => unreachable,
         };
     }

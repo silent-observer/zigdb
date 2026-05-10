@@ -123,7 +123,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
         var descr: TupleDescriptor = .emptyExtended;
         while (attr_scanner.next()) |attr| {
             descr.attrs.append(self.gpa, .{
-                .name = attr.attr_name,
+                .name = attr.attr_name.text(),
                 .t = @enumFromInt(attr.attr_type),
             }) catch oom();
         }
@@ -278,7 +278,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     }
                     // Check text filter
                     if (self.key_text) |key_text| {
-                        const tuple_text = tuple.get([]const u8, key_text);
+                        const tuple_text = tuple.get(common.Text, key_text).text();
                         // Does the text match?
                         const match = if (self.ignore_case)
                             std.ascii.eqlIgnoreCase(tuple_text, self.val_text.?)
@@ -402,7 +402,7 @@ pub fn Table(comptime id: tables.TableId) type {
                         " is " ++ @typeName(tables.Attr(a)) ++
                         ", not uint32, cannot use catalog scan");
             }
-            if (tables.Attr(attr_text) != []const u8)
+            if (tables.Attr(attr_text) != common.Text)
                 @compileError("Attribute " ++ @tagName(attr_text) ++
                     " is " ++ @typeName(tables.Attr(attr_text)) ++
                     ", not text, cannot use catalog scan");
@@ -498,7 +498,7 @@ pub fn build(self: *CatalogCache) !void {
     for (std.enums.values(tables.TableId)) |id| {
         try self.catalog.zdb_rels.add(self.storage_cache, .{
             .rel_id = @intFromEnum(id),
-            .rel_name = @tagName(id),
+            .rel_name = .makeRaw(@tagName(id)),
         }, .frozen);
     }
 
@@ -511,7 +511,7 @@ pub fn build(self: *CatalogCache) !void {
                 .attr_rel_id = @intFromEnum(rel_id),
                 .attr_id = @intCast(i),
                 .attr_type = @intFromEnum(dbtype),
-                .attr_name = name,
+                .attr_name = .makeRaw(name),
             }, .frozen);
         }
     }

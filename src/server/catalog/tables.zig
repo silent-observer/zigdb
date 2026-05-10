@@ -81,7 +81,7 @@ const Tables: []const TableEntry = &.{
             AttributeEntry{
                 .id = .rel_name,
                 .db_type = .text,
-                .t = []const u8,
+                .t = common.Text,
             },
         },
     },
@@ -106,7 +106,7 @@ const Tables: []const TableEntry = &.{
             AttributeEntry{
                 .id = .attr_name,
                 .db_type = .text,
-                .t = []const u8,
+                .t = common.Text,
             },
         },
     },

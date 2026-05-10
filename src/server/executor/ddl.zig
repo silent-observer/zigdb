@@ -38,7 +38,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable) ![]const u8 {
         s.shared.storage_cache,
         .{
             .rel_id = table_id,
-            .rel_name = stmt.name,
+            .rel_name = .makeRaw(stmt.name),
         },
         s.current_tid.real,
     );
@@ -52,7 +52,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable) ![]const u8 {
             .{
                 .attr_id = @intCast(i),
                 .attr_rel_id = table_id,
-                .attr_name = name,
+                .attr_name = .makeRaw(name),
                 .attr_type = @intFromEnum(t),
             },
             s.current_tid.real,
