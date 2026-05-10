@@ -1,4 +1,5 @@
 const std = @import("std");
+const uuid = @import("uuid");
 const oom = @import("utils.zig").oom;
 const ObjectId = @import("ids.zig").ObjectId;
 const Text = @import("value.zig").Text;
@@ -16,6 +17,7 @@ pub const DBType = enum(u32) {
     int8,
     boolean,
     text,
+    uuid,
     any,
 
     /// Can this type be silently converted to other type?
@@ -35,6 +37,7 @@ pub const DBType = enum(u32) {
             .uint4, .int4 => 4,
             .uint8, .int8 => 8,
             .boolean => 1,
+            .uuid => 16,
             .text => null,
             .any => null,
         };
@@ -83,6 +86,7 @@ pub const DBType = enum(u32) {
             .uint8, .int8 => 8,
             .boolean => 1,
             .text => 8,
+            .uuid => 16,
             .any => unreachable,
         };
     }
@@ -101,6 +105,7 @@ pub const DBType = enum(u32) {
             .int8 => T == i64,
             .boolean => T == bool,
             .text => T == Text,
+            .uuid => T == uuid.Uuid,
             .any => unreachable,
         };
     }

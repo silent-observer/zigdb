@@ -4,15 +4,23 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize: std.builtin.OptimizeMode = b.standardOptimizeOption(.{});
 
+    const zeit = b.dependency("zeit", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const uuid = b.dependency("uuid", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Common module between client and server
     const common = b.addModule("common", .{
         .root_source_file = b.path("src/common/common.zig"),
         .target = target,
-    });
-
-    const zeit = b.dependency("zeit", .{
-        .target = target,
-        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "uuid", .module = uuid.module("uuid") },
+        },
     });
 
     // Main library module for the server
@@ -21,6 +29,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .imports = &.{
             .{ .name = "common", .module = common },
+            .{ .name = "uuid", .module = uuid.module("uuid") },
             .{ .name = "zeit", .module = zeit.module("zeit") },
         },
     });
@@ -62,6 +71,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "uuid", .module = uuid.module("uuid") },
                 .{ .name = "common", .module = common },
             },
         }),
@@ -77,6 +87,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "uuid", .module = uuid.module("uuid") },
                 .{ .name = "common", .module = common },
             },
         }),

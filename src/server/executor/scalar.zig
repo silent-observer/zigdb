@@ -50,6 +50,7 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
                         .null => unreachable,
                         .boolean => lhs.boolean == rhs.boolean,
                         .int => lhs.int == rhs.int,
+                        .uuid => lhs.uuid == rhs.uuid,
                         .text => std.mem.eql(u8, lhs.text.text(), rhs.text.text()),
                     };
                     return .{ .boolean = if (b.op == .eq) v else !v };

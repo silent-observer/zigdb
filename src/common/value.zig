@@ -1,4 +1,5 @@
 const std = @import("std");
+const uuid = @import("uuid");
 const t = @import("types.zig");
 const oom = @import("utils.zig").oom;
 
@@ -36,6 +37,7 @@ pub const Value = union(enum) {
     int: i64,
     text: Text,
     boolean: bool,
+    uuid: uuid.Uuid,
     null: void,
 
     /// Obtain comptime-known type from a Value.
@@ -51,6 +53,10 @@ pub const Value = union(enum) {
                 return Error.InvalidType,
             bool => if (v == .boolean)
                 return v.boolean
+            else
+                return Error.InvalidType,
+            uuid.Uuid => if (v == .uuid)
+                return v.uuid
             else
                 return Error.InvalidType,
             else => return Error.InvalidType,
@@ -74,6 +80,7 @@ pub const Value = union(enum) {
             => return v == .int,
             .text => return v == .text,
             .boolean => return v == .boolean,
+            .uuid => return v == .uuid,
         }
     }
 
@@ -104,6 +111,7 @@ pub const Value = union(enum) {
             },
             .text => |s| return s.len(),
             .boolean => return 1,
+            .uuid => return 36,
             .null => return 0,
         }
     }

@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const common = @import("common");
+const uuid = @import("uuid");
 
 const Table = @This();
 
@@ -83,7 +84,7 @@ pub fn format(
 
             const total_pad = w - width;
             const left_pad = switch (v) {
-                .boolean, .text, .null => 0,
+                .boolean, .text, .uuid, .null => 0,
                 .int => total_pad,
             };
             const right_pad = total_pad - left_pad;
@@ -93,6 +94,7 @@ pub fn format(
                 .boolean => |b| try writer.writeByte(if (b) 't' else 'f'),
                 .int => |x| try writer.print("{}", .{x}),
                 .text => |s| try writer.writeAll(s.text()),
+                .uuid => |u| try writer.writeAll(&uuid.urn.serialize(u)),
                 .null => {},
             }
 

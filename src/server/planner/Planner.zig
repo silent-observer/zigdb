@@ -305,6 +305,7 @@ fn evalConstExpression(
                         .null => unreachable,
                         .boolean => lhs.v.boolean == rhs.v.boolean,
                         .int => lhs.v.int == rhs.v.int,
+                        .uuid => lhs.v.uuid == rhs.v.uuid,
                         .text => std.mem.eql(u8, lhs.v.text.text(), rhs.v.text.text()),
                     };
                     return common.TypedValue{

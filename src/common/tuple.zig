@@ -49,6 +49,7 @@
 //! ```
 
 const std = @import("std");
+const uuid = @import("uuid");
 const ids = @import("ids.zig");
 const t = @import("types.zig");
 const value = @import("value.zig");
@@ -256,6 +257,7 @@ pub const MemTuple = struct {
             .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
             .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
+            .uuid => return .{ .uuid = @intCast(std.mem.bytesToValue(uuid.Uuid, data)) },
             .text => return .{ .text = Text.fromBytes(data) },
             .any => unreachable,
         };
@@ -423,6 +425,7 @@ pub const MemTuple = struct {
                     const x: u64 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },
+                .uuid => b.pushBytes(std.mem.asBytes(&val.uuid)),
                 .any => unreachable,
             }
         }
