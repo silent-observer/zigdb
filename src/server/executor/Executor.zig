@@ -28,7 +28,7 @@ pub fn execute(
     cxt: *Context,
 ) ![]const u8 {
     return switch (stmt.*) {
-        .create_table => try ddl.executeCreateTable(stmt.create_table),
+        .create_table => try ddl.executeCreateTable(stmt.create_table, cxt),
         .drop_table => try ddl.executeDropTable(stmt.drop_table),
         .insert => try modify.executeInsert(stmt.insert, cxt),
         .select => try executeSelect(stmt.select, cxt),

@@ -2,16 +2,27 @@
 
 const std = @import("std");
 
+const Context = @import("Context.zig");
 const Session = @import("../Session.zig");
 const Plan = @import("../planner.zig").Plan;
 const common = @import("common");
 const oom = common.oom;
 const heap = @import("../heap.zig");
+const toaster = @import("../toaster.zig");
 
 /// Evaluate a scalar node in the context of some tuple
-pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) !common.Value {
+pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Context) !common.Value {
     switch (scalar.action) {
-        .column => |i| return tuple.getValue(i), // Get column from tuple
+        .column => |i| {
+            const v = tuple.getValue(i);
+            switch (v) {
+                // Text values might have been toasted, we should retrieve their raw representation
+                .text => |t| return .{
+                    .text = try toaster.retrieve(t, cxt.alloc, cxt.snapshot),
+                },
+                else => return v,
+            }
+        }, // Get column from tuple
         .value => |v| return v, // Constant value
         .next_serial => |t| {
             const s = Session.get();
@@ -23,7 +34,7 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) !common.Valu
             return .{ .int = @intCast(try table.getNextSerial()) };
         },
         .unary => |u| {
-            const x = try eval(u.child, tuple);
+            const x = try eval(u.child, tuple, cxt);
             return switch (u.op) {
                 .neg => if (x == .null) .null else .{ .int = -x.int },
                 .not => if (x == .null) .null else .{ .boolean = !x.boolean },
@@ -32,8 +43,8 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) !common.Valu
             };
         },
         .binary => |b| {
-            const lhs = try eval(b.left, tuple);
-            const rhs = try eval(b.right, tuple);
+            const lhs = try eval(b.left, tuple, cxt);
+            const rhs = try eval(b.right, tuple, cxt);
             if (lhs == .null or rhs == .null)
                 return .null;
             switch (b.op) {

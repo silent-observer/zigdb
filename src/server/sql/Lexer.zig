@@ -58,6 +58,7 @@ pub const Token = struct {
         int,
         serial,
         boolean,
+        long,
         text,
         @"and",
         @"or",

@@ -560,6 +560,11 @@ fn parseType(p: *Parser) InternalError!DBType {
             p.pos += 1;
             return .boolean;
         },
+        .long => {
+            p.pos += 1;
+            try p.expectKeyword(.text);
+            return .long_text;
+        },
         .text => {
             p.pos += 1;
             return .text;

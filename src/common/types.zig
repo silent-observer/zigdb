@@ -17,6 +17,7 @@ pub const DBType = enum(u32) {
     int4,
     int8,
     boolean,
+    long_text,
     text,
     uuid,
     any,
@@ -26,6 +27,8 @@ pub const DBType = enum(u32) {
         if (self == .any) return true;
         if (std.meta.eql(self, other)) return true;
         if (self == .oid and other == .uint4) return true;
+        if (self == .text and other == .long_text) return true;
+        if (self == .long_text and other == .text) return true;
         return false;
     }
 
@@ -39,7 +42,7 @@ pub const DBType = enum(u32) {
             .uint8, .int8, .serial => 8,
             .boolean => 1,
             .uuid => 16,
-            .text => null,
+            .text, .long_text => null,
             .any => null,
         };
     }
@@ -86,7 +89,7 @@ pub const DBType = enum(u32) {
             .uint4, .int4 => 4,
             .uint8, .int8, .serial => 8,
             .boolean => 1,
-            .text => 8,
+            .text, .long_text => 8,
             .uuid => 16,
             .any => unreachable,
         };
@@ -105,7 +108,7 @@ pub const DBType = enum(u32) {
             .int4 => T == i32,
             .int8 => T == i64,
             .boolean => T == bool,
-            .text => T == Text,
+            .text, .long_text => T == Text,
             .uuid => T == uuid.Uuid,
             .any => unreachable,
         };
@@ -129,7 +132,7 @@ pub const TupleDescriptor = struct {
         .attrs = .empty,
         .has_extended = false,
     };
-    pub const emptyExtended = TupleDescriptor{
+    pub const empty_extended = TupleDescriptor{
         .attrs = .empty,
         .has_extended = true,
     };

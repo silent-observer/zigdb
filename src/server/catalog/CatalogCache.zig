@@ -32,33 +32,8 @@ descr: std.array_hash_map.Auto(ids.TableId, TupleDescriptor),
 pub const CatalogTables = struct {
     zdb_rels: Table(tables.TableId.zdb_rels),
     zdb_attrs: Table(tables.TableId.zdb_attrs),
+    // Toast tables are not actually catalog
 };
-
-// Ideally, the CatalogTables type above should also be auto-generated, but
-// this breaks code autocompletion, so for now it is defined manually.
-
-// pub const CatalogTables = T: {
-//     const ids = std.enums.values(tables.RelationId);
-
-//     var field_names: [ids.len][]const u8 = undefined;
-//     var field_types: [ids.len]type = undefined;
-//     var field_attrs: [ids.len]std.builtin.Type.StructField.Attributes = undefined;
-//     for (ids, 0..) |id, i| {
-//         field_names[i] = @tagName(id);
-//         field_types[i] = Table(id);
-//         field_attrs[i] = .{};
-//     }
-
-//     const Result = @Struct(
-//         .auto,
-//         null,
-//         &field_names,
-//         &field_types,
-//         &field_attrs,
-//     );
-
-//     break :T Result;
-// };
 
 /// Initialize the catalog cache. This does not read anything, the catalog is empty.
 pub fn init(
@@ -66,10 +41,10 @@ pub fn init(
     db_id: ids.DatabaseId,
     storage_cache: *storage.Cache,
 ) CatalogCache {
-    var catalog: CatalogTables = undefined;
-    inline for (std.enums.values(tables.TableId)) |id| {
-        @field(catalog, @tagName(id)) = .init(gpa, db_id);
-    }
+    const catalog: CatalogTables = .{
+        .zdb_rels = .init(gpa, db_id),
+        .zdb_attrs = .init(gpa, db_id),
+    };
     return CatalogCache{
         .db_id = db_id,
         .gpa = gpa,
@@ -120,7 +95,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
             self.catalog.zdb_attrs.scan(&.{.attr_rel_id}, &.{rel.rel_id});
 
         // Build the descriptor
-        var descr: TupleDescriptor = .emptyExtended;
+        var descr: TupleDescriptor = .empty_extended;
         while (attr_scanner.next()) |attr| {
             descr.attrs.append(self.gpa, .{
                 .name = attr.attr_name.text(),
@@ -499,6 +474,7 @@ pub fn build(self: *CatalogCache) !void {
         try self.catalog.zdb_rels.add(self.storage_cache, .{
             .rel_id = @intFromEnum(id),
             .rel_name = .makeRaw(@tagName(id)),
+            .rel_toast_id = null,
         }, .frozen);
     }
 

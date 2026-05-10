@@ -30,6 +30,8 @@ pub const Statement = union(enum) {
     pub const Insert = struct {
         /// Table to insert rows into
         table: ids.TableId,
+        /// Optional toast table
+        toast_table: ?ids.TableId,
         /// Source of the data
         root: *DataNode,
     };
@@ -44,6 +46,8 @@ pub const Statement = union(enum) {
     pub const Update = struct {
         /// Table to update rows in
         table: ids.TableId,
+        /// Optional toast table
+        toast_table: ?ids.TableId,
         /// Source of the data
         root: *DataNode,
         /// Columns that need updating
@@ -62,11 +66,15 @@ pub const Statement = union(enum) {
     pub const DropTable = struct {
         /// Id of the table to be dropped
         table: ids.TableId,
+        /// Optional toast table
+        toast_table: ?ids.TableId,
     };
 
     pub const Truncate = struct {
         /// Id of the table to be truncated
         table: ids.TableId,
+        /// Optional toast table
+        toast_table: ?ids.TableId,
     };
 };
 

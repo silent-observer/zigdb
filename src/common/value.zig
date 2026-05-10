@@ -1,32 +1,58 @@
 const std = @import("std");
 const uuid = @import("uuid");
+const ids = @import("ids.zig");
 const t = @import("types.zig");
 const oom = @import("utils.zig").oom;
 
-/// Text is a special type, because it always starts with a 0 byte to distinguish from NULL
+/// Text is a TOASTable sequence of bytes. Short strings are stored raw, while
+/// long strings should be TOASTed.
+/// In the in-tuple representation, raw strings start with 0x00 byte, while
+/// TOASTed strings start with 0x01. This has a nice side effect that Text
+/// length is never 0, distinguishing it from NULL. An empty string is represented
+/// with a single 0x00 byte.
 pub const Text = union(enum) {
     raw: []const u8,
+    toast: Toast,
 
+    /// TOAST is a way to store long strings in a separate TOAST table, split into chunks
+    /// This means the actual Text value in the tuple is just a reference to a full value
+    /// that is stored in the TOAST table.
+    pub const Toast = extern struct {
+        toast_table_id: ids.TableId, // Which TOAST table is it stored in
+        size: u32, // Length of the string
+        toast_id: u64, // Id of the toasted value
+    };
+
+    /// Parse Text value from raw bytes
     pub fn fromBytes(bytes: []const u8) Text {
         return switch (bytes[0]) {
             0x00 => .{ .raw = bytes[1..] },
+            0x01 => .{ .toast = std.mem.bytesToValue(
+                Toast,
+                bytes[1..],
+            ) },
             else => unreachable,
         };
     }
 
+    /// Create a raw Text object
     pub fn makeRaw(str: []const u8) Text {
         return .{ .raw = str };
     }
 
+    /// Obtain actual string from a (raw) Text.
     pub fn text(self: Text) []const u8 {
         switch (self) {
             .raw => |r| return r,
+            .toast => unreachable,
         }
     }
 
+    /// Get length of the actual string in a (raw) Text.
     pub fn len(self: Text) usize {
         switch (self) {
             .raw => |r| return r.len,
+            .toast => unreachable,
         }
     }
 };
@@ -79,7 +105,7 @@ pub const Value = union(enum) {
             .uint8,
             .serial,
             => return v == .int,
-            .text => return v == .text,
+            .text, .long_text => return v == .text,
             .boolean => return v == .boolean,
             .uuid => return v == .uuid,
         }

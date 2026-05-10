@@ -40,7 +40,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     // Get one tuple from child
     while (try Executor.execDataNode(plan.action.filter.input, cxt)) |input| {
         // Check the condition
-        const cond = try scalar.eval(plan.action.filter.condition, input);
+        const cond = try scalar.eval(plan.action.filter.condition, input, cxt);
         // Return the tuple if condition is true, skip if false
         const b = switch (cond) {
             .null => false,

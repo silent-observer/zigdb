@@ -98,7 +98,7 @@ fn addError(p: *Planner, comptime fmt: []const u8, args: anytype) void {
 }
 
 /// Finds a table by its name
-fn findTable(p: *Planner, name: []const u8) Error!ids.TableId {
+fn findTable(p: *Planner, name: []const u8) Error!catalog.Entry(.zdb_rels) {
     // Scan through the catalog
     var scanner = p.cat.catalog.zdb_rels.scanTextIgnoreCase(
         .rel_name,
@@ -109,7 +109,7 @@ fn findTable(p: *Planner, name: []const u8) Error!ids.TableId {
     const table = scanner.next();
     if (table) |t| {
         // If found, return it
-        return t.rel_id;
+        return t;
     } else {
         // If not found, emit error
         p.addError("Unknown table \"{s}\"", .{name});
@@ -119,15 +119,19 @@ fn findTable(p: *Planner, name: []const u8) Error!ids.TableId {
 
 /// Plan DROP TABLE statement
 fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Statement {
+    const table = try p.findTable(stmt.name);
     return p.make(Plan.Statement{ .drop_table = .{
-        .table = try p.findTable(stmt.name),
+        .table = table.rel_id,
+        .toast_table = table.rel_toast_id,
     } });
 }
 
 /// Plan TRUNCATE statement
 fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement {
+    const table = try p.findTable(stmt.name);
     return p.make(Plan.Statement{ .truncate = .{
-        .table = try p.findTable(stmt.name),
+        .table = table.rel_id,
+        .toast_table = table.rel_toast_id,
     } });
 }
 
@@ -135,7 +139,7 @@ fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement
 fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.Statement {
     // Find the target table
     const table = try p.findTable(stmt.name);
-    const full_descr = p.cat.descr.getPtr(table).?;
+    const full_descr = p.cat.descr.getPtr(table.rel_id).?;
     // List of expressions for projection
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
@@ -182,7 +186,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
             if (t == .serial) {
                 scalar.* = .{
                     .dbtype = t,
-                    .action = .{ .next_serial = table },
+                    .action = .{ .next_serial = table.rel_id },
                 };
             } else {
                 p.addError(
@@ -213,7 +217,8 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
 
     // Finally make the statement node
     return p.make(Plan.Statement{ .insert = .{
-        .table = table,
+        .table = table.rel_id,
+        .toast_table = table.rel_toast_id,
         .root = root,
     } });
 }
@@ -464,7 +469,7 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
 
     // Make the statement node
     return p.make(Plan.Statement{ .delete = .{
-        .table = table,
+        .table = table.rel_id,
         .root = root,
     } });
 }
@@ -517,7 +522,8 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
 
     // Make the statement node
     return p.make(Plan.Statement{ .update = .{
-        .table = table,
+        .table = table.rel_id,
+        .toast_table = table.rel_toast_id,
         .root = root,
         .cols = cols.toOwnedSlice(p.alloc) catch oom(),
         .vals = vals.toOwnedSlice(p.alloc) catch oom(),
@@ -539,12 +545,12 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
     // Find the table in question
     const table_id = try p.findTable(table.name);
     // Find its descriptor
-    const descr = p.make(p.cat.descr.get(table_id).?);
+    const descr = p.make(p.cat.descr.get(table_id.rel_id).?);
     // Build the data source node
     return p.make(Plan.DataNode{
         .descr = descr,
         .action = .{ .full_scan = .{
-            .table = table_id,
+            .table = table_id.rel_id,
         } },
     });
 }

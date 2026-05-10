@@ -125,7 +125,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
 
         // Check the condition
         const cond = if (plan.action.nested_loop.cond) |cond|
-            try scalar.eval(cond, result_tuple)
+            try scalar.eval(cond, result_tuple, cxt)
         else
             common.Value{ .boolean = true };
         // Return the tuple if condition is true, skip if false

@@ -12,8 +12,9 @@
 //! ```sql
 //! -- Tables
 //! CREATE TABLE zdb_rels (
-//!     rel_id      UINT4 PRIMARY KEY,  -- table id
-//!     rel_name    TEXT                -- table name
+//!     rel_id       UINT4 PRIMARY KEY,  -- table id
+//!     rel_name     TEXT,               -- table name
+//!     rel_toast_id UINT4               -- table id of toast table, or NULL
 //! );
 //! -- Attributes of tables
 //! CREATE TABLE zdb_attrs (
@@ -22,6 +23,9 @@
 //!     attr_type   UINT4,  -- type if of the attribute
 //!     attr_name   TEXT,   -- attribute name
 //!     PRIMARY KEY (attr_rel_id, attr_id)
+//! );
+//! -- Arbitrary toast table (
+//!
 //! );
 //! ```
 //!
@@ -38,6 +42,9 @@ const oom = common.oom;
 pub const TableId = enum(common.ids.TableId) {
     zdb_rels = 1,
     zdb_attrs = 2,
+    // This is not actually catalog, simply a well-defined descriptor for
+    // possibly many different toast tables.
+    toast_table,
 };
 
 /// Enum used to refer to specific system attributes.
@@ -46,11 +53,16 @@ pub const SystemAttribute = enum {
     // zdb_rels
     rel_id,
     rel_name,
+    rel_toast_id,
     // zdb_attrs
     attr_rel_id,
     attr_id,
     attr_type,
     attr_name,
+    // toast_table
+    toast_id,
+    toast_seq,
+    toast_data,
 };
 
 /// Internal entry for each catalog attribute.
@@ -83,6 +95,11 @@ const Tables: []const TableEntry = &.{
                 .db_type = .text,
                 .t = common.Text,
             },
+            AttributeEntry{
+                .id = .rel_toast_id,
+                .db_type = .oid,
+                .t = ?u32,
+            },
         },
     },
     TableEntry{
@@ -105,6 +122,26 @@ const Tables: []const TableEntry = &.{
             },
             AttributeEntry{
                 .id = .attr_name,
+                .db_type = .text,
+                .t = common.Text,
+            },
+        },
+    },
+    TableEntry{
+        .id = .toast_table,
+        .attrs = &.{
+            AttributeEntry{
+                .id = .toast_id,
+                .db_type = .serial,
+                .t = u64,
+            },
+            AttributeEntry{
+                .id = .toast_seq,
+                .db_type = .uint4,
+                .t = u32,
+            },
+            AttributeEntry{
+                .id = .toast_data,
                 .db_type = .text,
                 .t = common.Text,
             },
@@ -146,7 +183,7 @@ fn fillAttrData() std.EnumArray(SystemAttribute, AttributeData) {
 fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, common.TupleDescriptor) {
     var result = std.EnumArray(TableId, common.TupleDescriptor).initUndefined();
     inline for (Tables) |r| {
-        var descr = common.TupleDescriptor.emptyExtended;
+        var descr = common.TupleDescriptor.empty_extended;
         descr.attrs.ensureUnusedCapacity(gpa, r.attrs.len) catch oom();
         inline for (r.attrs) |a| {
             descr.attrs.appendAssumeCapacity(.{

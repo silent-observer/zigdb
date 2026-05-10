@@ -234,6 +234,12 @@ pub const MemTuple = struct {
     /// Get i-th attribute with a comptime-known type T.
     pub fn get(self: MemTuple, T: type, i: usize) T {
         const data: []const u8 = self.dataPtr(i);
+        if (@typeInfo(T) == .optional) {
+            if (data.len == 0)
+                return null
+            else
+                return self.get(@typeInfo(T).optional.child, i);
+        }
         std.debug.assert(self.dbtype(i).checkType(T));
         return switch (T) {
             u8, u16, u32, u64, i8, i16, i32, i64, bool => std.mem.bytesToValue(T, data),
@@ -258,7 +264,7 @@ pub const MemTuple = struct {
             .uint8, .serial => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
             .uuid => return .{ .uuid = @intCast(std.mem.bytesToValue(uuid.Uuid, data)) },
-            .text => return .{ .text = Text.fromBytes(data) },
+            .text, .long_text => return .{ .text = Text.fromBytes(data) },
             .any => unreachable,
         };
     }
@@ -290,7 +296,7 @@ pub const MemTuple = struct {
             .uint4, .oid => std.mem.bytesAsValue(u32, data).* = @intCast(val.int),
             .uint8 => std.mem.bytesAsValue(u64, data).* = @intCast(val.int),
             .boolean => std.mem.bytesAsValue(bool, data).* = val.boolean,
-            .text => unreachable,
+            .text, .long_text => unreachable,
         };
     }
 
@@ -354,26 +360,42 @@ pub const MemTuple = struct {
         fn pushText(b: *Builder, text: Text) void {
             switch (text) {
                 .raw => |r| {
-                    b.offset += @intCast(r.len + 1);
+                    b.offset += @intCast(1 + r.len);
                     b.index += 1;
                     std.debug.assert(b.index <= b.tuple().len());
                     b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
                     b.arr.append(b.gpa, 0x00) catch oom();
                     b.arr.appendSlice(b.gpa, r) catch oom();
                 },
+                .toast => |toast| {
+                    b.offset += 1 + @sizeOf(Text.Toast);
+                    b.index += 1;
+                    std.debug.assert(b.index <= b.tuple().len());
+                    b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
+
+                    b.arr.append(b.gpa, 0x01) catch oom();
+                    b.arr.appendSlice(b.gpa, std.mem.asBytes(&toast)) catch oom();
+                },
             }
         }
 
         /// Push a value of comptime-known type T.
         pub fn push(b: *Builder, T: type, val: T) void {
-            const i = b.index;
-            std.debug.assert(i < b.tuple().len());
-            std.debug.assert(b.tuple().dbtype(i).checkType(T));
+            if (@typeInfo(T) == .optional) {
+                if (val) |v|
+                    b.push(@typeInfo(T).optional.child, v)
+                else
+                    b.pushBytes(&.{});
+            } else {
+                const i = b.index;
+                std.debug.assert(i < b.tuple().len());
+                std.debug.assert(b.tuple().dbtype(i).checkType(T));
 
-            if (T == Text)
-                b.pushText(val)
-            else
-                b.pushBytes(std.mem.asBytes(&val));
+                if (T == Text)
+                    b.pushText(val)
+                else
+                    b.pushBytes(std.mem.asBytes(&val));
+            }
         }
 
         /// Push a value of runtime-known type.
@@ -390,7 +412,7 @@ pub const MemTuple = struct {
 
             switch (b.tuple().dbtype(i)) {
                 .boolean => b.pushBytes(std.mem.asBytes(&val.boolean)),
-                .text => b.pushText(val.text),
+                .text, .long_text => b.pushText(val.text),
 
                 .int1 => {
                     const x: i8 = @intCast(val.int);
