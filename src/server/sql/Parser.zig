@@ -547,6 +547,7 @@ fn parseRollback(p: *Parser) ast.Statement {
 /// Type = "INT"
 ///      | "BOOL"
 ///      | "TEXT"
+///      | "SERIAL"
 /// ```
 fn parseType(p: *Parser) InternalError!DBType {
     const t = p.peek();
@@ -562,6 +563,10 @@ fn parseType(p: *Parser) InternalError!DBType {
         .text => {
             p.pos += 1;
             return .text;
+        },
+        .serial => {
+            p.pos += 1;
+            return .serial;
         },
         else => {},
     };

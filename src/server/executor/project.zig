@@ -54,7 +54,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
         // Go through our expressions
         for (plan.action.project.exprs) |expr| {
             // Evaluate each one and add the result to the output tuple
-            const v = scalar.eval(&expr, input.?);
+            const v = try scalar.eval(&expr, input.?);
             b.pushValue(v);
         }
     }

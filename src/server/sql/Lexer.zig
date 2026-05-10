@@ -56,6 +56,7 @@ pub const Token = struct {
         commit,
         rollback,
         int,
+        serial,
         boolean,
         text,
         @"and",

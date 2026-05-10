@@ -2,18 +2,28 @@
 
 const std = @import("std");
 
-const Context = @import("Context.zig");
+const Session = @import("../Session.zig");
 const Plan = @import("../planner.zig").Plan;
 const common = @import("common");
 const oom = common.oom;
+const heap = @import("../heap.zig");
 
 /// Evaluate a scalar node in the context of some tuple
-pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value {
+pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) !common.Value {
     switch (scalar.action) {
         .column => |i| return tuple.getValue(i), // Get column from tuple
         .value => |v| return v, // Constant value
+        .next_serial => |t| {
+            const s = Session.get();
+            // Assume we already have the correct lock for this table
+            const table = heap.Table.init(
+                s.shared.storage_cache,
+                .{ .db = s.db_id, .table = t },
+            );
+            return .{ .int = @intCast(try table.getNextSerial()) };
+        },
         .unary => |u| {
-            const x = eval(u.child, tuple);
+            const x = try eval(u.child, tuple);
             return switch (u.op) {
                 .neg => if (x == .null) .null else .{ .int = -x.int },
                 .not => if (x == .null) .null else .{ .boolean = !x.boolean },
@@ -22,8 +32,8 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple) common.Value
             };
         },
         .binary => |b| {
-            const lhs = eval(b.left, tuple);
-            const rhs = eval(b.right, tuple);
+            const lhs = try eval(b.left, tuple);
+            const rhs = try eval(b.right, tuple);
             if (lhs == .null or rhs == .null)
                 return .null;
             switch (b.op) {

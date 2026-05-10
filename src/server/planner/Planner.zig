@@ -139,6 +139,8 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     // List of expressions for projection
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
+    var isScalarNodeFilled =
+        std.ArrayList(bool).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
 
     // This is the descriptor of what we get as input data
     const input_descr = p.alloc.create(common.TupleDescriptor) catch oom();
@@ -146,12 +148,9 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         // If the user specified the list of columns, we might need to reorder them for storage.
         input_descr.* = .empty;
         input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
-        if (stmt.columns.len != full_descr.attrs.len) {
-            p.addError("Partial insert is not yet supported", .{});
-            return Error.NotSupported;
-        }
 
         _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.attrs.len);
+        isScalarNodeFilled.appendNTimesAssumeCapacity(false, full_descr.attrs.len);
 
         // Go through the columns in the statement
         for (stmt.columns, 0..) |col_name, i| {
@@ -168,6 +167,30 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                 .action = .{ .column = @intCast(i) },
                 .dbtype = full_descr.attrs.get(col_id.?).t,
             };
+            isScalarNodeFilled.items[col_id.?] = true;
+        }
+
+        // Fill in missing columns with default values
+        const slice = full_descr.attrs.slice();
+        for (
+            scalarNodes.items,
+            isScalarNodeFilled.items,
+            slice.items(.t),
+            slice.items(.name),
+        ) |*scalar, isFilled, t, col_name| {
+            if (isFilled) continue;
+            if (t == .serial) {
+                scalar.* = .{
+                    .dbtype = t,
+                    .action = .{ .next_serial = table },
+                };
+            } else {
+                p.addError(
+                    "Missing value for column \"{s}\" in table \"{s}\"",
+                    .{ col_name, stmt.name },
+                );
+                return Error.NotSupported;
+            }
         }
     } else {
         input_descr.* = full_descr.clone(p.alloc);

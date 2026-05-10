@@ -154,6 +154,7 @@ pub const ScalarNode = struct {
         value: common.Value, // Constant value
         unary: Unary, // Unary operation
         binary: Binary, // Binary operation
+        next_serial: ids.TableId, // Auto generate the next serial ID
     };
 
     pub const Unary = struct {

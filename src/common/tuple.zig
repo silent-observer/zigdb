@@ -255,7 +255,7 @@ pub const MemTuple = struct {
             .uint1 => return .{ .int = @intCast(std.mem.bytesToValue(u8, data)) },
             .uint2 => return .{ .int = @intCast(std.mem.bytesToValue(u16, data)) },
             .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
-            .uint8 => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
+            .uint8, .serial => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
             .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
             .uuid => return .{ .uuid = @intCast(std.mem.bytesToValue(uuid.Uuid, data)) },
             .text => return .{ .text = Text.fromBytes(data) },
@@ -421,7 +421,7 @@ pub const MemTuple = struct {
                     const x: u32 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },
-                .uint8 => {
+                .uint8, .serial => {
                     const x: u64 = @intCast(val.int);
                     b.pushBytes(std.mem.asBytes(&x));
                 },

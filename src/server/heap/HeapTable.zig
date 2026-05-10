@@ -28,6 +28,8 @@ pub const Header = extern struct {
     pages: u16,
     // Reserved space
     padding: [6]u8 = std.mem.zeroes([6]u8),
+    // Counter for a SERIAL field
+    serial_counter: std.atomic.Value(u64),
 
     const Magic: [8]u8 = .{ 'Z', 'D', 'B', '_', 'H', 'E', 'A', 'P' };
 
@@ -68,6 +70,7 @@ pub fn create(self: HeapTable) !void {
     const header = Header{
         .table_id = self.table_id,
         .pages = 1,
+        .serial_counter = .init(0),
     };
     header.writePage(page.page);
 }
@@ -111,6 +114,18 @@ pub fn readHeader(self: HeapTable) !Header {
     defer self.cache.unpin(page);
 
     return Header.fromPage(page.page).*;
+}
+
+/// Get next value of the SERIAL counter
+pub fn getNextSerial(self: HeapTable) !u64 {
+    const page = try self.cache.getWriteable(.{
+        .file = self.table_id.fullFileId(),
+        .page = 0,
+    });
+    defer self.cache.unpin(page);
+
+    const header = Header.fromPage(page.page);
+    return header.serial_counter.fetchAdd(1, .acq_rel);
 }
 
 /// Add a new tuple to the HeapTable.

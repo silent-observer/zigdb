@@ -77,6 +77,7 @@ pub const Value = union(enum) {
             .uint2,
             .uint4,
             .uint8,
+            .serial,
             => return v == .int,
             .text => return v == .text,
             .boolean => return v == .boolean,
