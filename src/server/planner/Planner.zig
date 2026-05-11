@@ -748,7 +748,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
             // Construct the scalar node
             return cxt.attrs.get(col_id.?).t;
         },
-        .integer => return .int4,
+        .integer => return .const_int,
         .string => return .text,
         .boolean => return .boolean,
         .null => return .any,

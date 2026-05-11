@@ -104,6 +104,7 @@ pub const Value = union(enum) {
             .uint4,
             .uint8,
             .serial,
+            .const_int,
             => return v == .int,
             .text, .long_text => return v == .text,
             .boolean => return v == .boolean,
