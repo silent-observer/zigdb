@@ -62,7 +62,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
         },
         .prepend_nulls => {
             // Special case: fill input with nulls
-            for (0..plan.descr.attrs.len - input.?.len()) |_| {
+            for (0..plan.descr.len() - input.?.len()) |_| {
                 b.pushValue(.null);
             }
             for (0..input.?.len()) |i| {

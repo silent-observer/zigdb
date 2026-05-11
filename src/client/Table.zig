@@ -43,12 +43,12 @@ pub fn format(
 
     // Fill column widths with widths of the headers
     var max_widths: std.ArrayList(u16) = .initBuffer(&buffer);
-    for (self.descr.?.attrs.items(.name)) |name|
-        max_widths.appendBounded(@intCast(name.len)) catch common.oom();
+    for (self.descr.?.attrs.items) |att|
+        max_widths.appendBounded(@intCast(att.name.len)) catch common.oom();
 
     // Go through all the tuples
     for (self.tuples.items) |t| {
-        for (0..self.descr.?.attrs.len) |i| {
+        for (0..self.descr.?.len()) |i| {
             const width = t.getValue(i).calcTextWidth();
             // Calculate the maximum width of each column
             max_widths.items[i] = @intCast(@max(max_widths.items[i], width));
@@ -56,14 +56,14 @@ pub fn format(
     }
 
     // Write the header
-    for (self.descr.?.attrs.items(.name), max_widths.items, 0..) |name, w, i| {
+    for (self.descr.?.attrs.items, max_widths.items, 0..) |att, w, i| {
         if (i > 0)
             try writer.writeByte('|');
-        const total_pad = w - name.len;
+        const total_pad = w - att.name.len;
         const left_pad = total_pad / 2;
         const right_pad = total_pad - left_pad;
         try writer.splatByteAll(' ', left_pad + 1);
-        try writer.writeAll(name);
+        try writer.writeAll(att.name);
         try writer.splatByteAll(' ', right_pad + 1);
     }
     try writer.writeByte('\n');

@@ -84,8 +84,8 @@ pub const Message = union(Tag) {
             .tuple => |tuple| tuple.size() - @sizeOf(MemTuple.Header),
             .tuple_descriptor => |td| size: {
                 var total_size: usize = @sizeOf(u8) + @sizeOf(u16);
-                for (td.attrs.items(.name)) |n| {
-                    total_size += @sizeOf(u32) + @sizeOf(u8) + n.len;
+                for (td.attrs.items) |att| {
+                    total_size += @sizeOf(u32) + @sizeOf(u8) + att.name.len;
                 }
                 break :size total_size;
             },
@@ -108,12 +108,11 @@ pub const Message = union(Tag) {
             },
             .tuple_descriptor => |td| {
                 try w.writeByte(@intFromBool(td.has_extended));
-                try w.writeInt(u16, @intCast(td.attrs.len), .little);
-                const slice = td.attrs.slice();
-                for (slice.items(.t), slice.items(.name)) |dbtype, name| {
-                    try w.writeInt(u32, @intFromEnum(dbtype), .little);
-                    try w.writeByte(@intCast(name.len));
-                    try w.writeAll(name);
+                try w.writeInt(u16, @intCast(td.len()), .little);
+                for (td.attrs.items) |att| {
+                    try w.writeInt(u32, @intFromEnum(att.t), .little);
+                    try w.writeByte(@intCast(att.name.len));
+                    try w.writeAll(att.name);
                 }
             },
             .err, .ready, .exit, .incomplete => {},
@@ -148,7 +147,7 @@ pub const Message = union(Tag) {
             .tuple_descriptor => {
                 const has_extended = try r.takeByte() > 0;
                 const attrs_len = try r.takeInt(u16, .little);
-                var attrs = std.MultiArrayList(t.AttributeDescriptor)
+                var attrs = std.ArrayList(t.AttributeDescriptor)
                     .initCapacity(alloc, attrs_len) catch oom();
                 for (0..attrs_len) |_| {
                     const dbtype: t.DBType = @enumFromInt(try r.takeInt(u32, .little));

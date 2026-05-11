@@ -149,12 +149,12 @@ pub const MemTuple = struct {
 
     /// Number of attributes in the MemTuple.
     pub fn len(self: MemTuple) usize {
-        return self.ptr.h.descr.attrs.len;
+        return self.ptr.h.descr.len();
     }
 
     /// Type of i-th attribute in the MemTuple.
     pub fn dbtype(self: MemTuple, i: usize) t.DBType {
-        return self.ptr.h.descr.attrs.items(.t)[i];
+        return self.ptr.h.descr.attrs.items[i].t;
     }
 
     /// Format the MemTuple like [1234, "hello!", true].
@@ -330,7 +330,7 @@ pub const MemTuple = struct {
             const has_ext = descr.has_extended;
             const header_size = @sizeOf(MemTuple.Header) +
                 @as(usize, if (has_ext) @sizeOf(MemTuple.ExtendedFields) else 0) +
-                (descr.attrs.len + 1) * @sizeOf(u16);
+                (descr.len() + 1) * @sizeOf(u16);
             // Array is initialized with approximate capacity.
             var arr = @FieldType(Builder, "arr")
                 .initCapacity(gpa, header_size + descr.approximateWidth()) catch oom();

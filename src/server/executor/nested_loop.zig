@@ -97,14 +97,14 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
                             for (0..left_tuple.len()) |i| {
                                 b.pushValue(left_tuple.getValue(i));
                             }
-                            for (0..plan.action.nested_loop.rhs.descr.attrs.len) |_| {
+                            for (0..plan.action.nested_loop.rhs.descr.len()) |_| {
                                 b.pushValue(.null);
                             }
                             if (plan.descr.has_extended)
                                 b.addExtended(left_tuple.extended().*);
                         },
                         .right_left => {
-                            for (0..plan.action.nested_loop.rhs.descr.attrs.len) |_| {
+                            for (0..plan.action.nested_loop.rhs.descr.len()) |_| {
                                 b.pushValue(.null);
                             }
                             for (0..left_tuple.len()) |i| {

@@ -37,8 +37,8 @@ const Text = common.Text;
 
 /// Does this table have any attributes that might need to be toasted?
 pub fn hasToastable(descr: *const common.TupleDescriptor) bool {
-    for (descr.attrs.items(.t)) |t| {
-        switch (t) {
+    for (descr.attrs.items) |att| {
+        switch (att.t) {
             .long_text => return true,
             else => {},
         }

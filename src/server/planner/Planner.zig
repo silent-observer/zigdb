@@ -143,9 +143,9 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     const full_descr = p.cat.descr.getPtr(table.rel_id).?;
     // List of expressions for projection
     var scalarNodes =
-        std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
+        std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.len()) catch oom();
     var isScalarNodeFilled =
-        std.ArrayList(bool).initCapacity(p.alloc, full_descr.attrs.len) catch oom();
+        std.ArrayList(bool).initCapacity(p.alloc, full_descr.len()) catch oom();
 
     // This is the descriptor of what we get as input data
     const input_descr = p.alloc.create(common.TupleDescriptor) catch oom();
@@ -154,8 +154,8 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         input_descr.* = .empty;
         input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
 
-        _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.attrs.len);
-        isScalarNodeFilled.appendNTimesAssumeCapacity(false, full_descr.attrs.len);
+        _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.len());
+        isScalarNodeFilled.appendNTimesAssumeCapacity(false, full_descr.len());
 
         // Go through the columns in the statement
         for (stmt.columns, 0..) |col_name, i| {
@@ -166,33 +166,31 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                 return Error.UnknownName;
             }
             // Build the descriptor for the input data we get from VALUES part of the query
-            input_descr.attrs.appendAssumeCapacity(full_descr.attrs.get(col_id.?));
+            input_descr.attrs.appendAssumeCapacity(full_descr.attrs.items[col_id.?]);
             // Build an expression for each physical column
             scalarNodes.items[col_id.?] = .{
                 .action = .{ .column = @intCast(i) },
-                .dbtype = full_descr.attrs.get(col_id.?).t,
+                .dbtype = full_descr.attrs.items[col_id.?].t,
             };
             isScalarNodeFilled.items[col_id.?] = true;
         }
 
         // Fill in missing columns with default values
-        const slice = full_descr.attrs.slice();
         for (
             scalarNodes.items,
             isScalarNodeFilled.items,
-            slice.items(.t),
-            slice.items(.name),
-        ) |*scalar, isFilled, t, col_name| {
+            full_descr.attrs.items,
+        ) |*scalar, isFilled, att| {
             if (isFilled) continue;
-            if (t == .serial) {
+            if (att.t == .serial) {
                 scalar.* = .{
-                    .dbtype = t,
+                    .dbtype = att.t,
                     .action = .{ .next_serial = table.rel_id },
                 };
             } else {
                 p.addError(
                     "Missing value for column \"{s}\" in table \"{s}\"",
-                    .{ col_name, stmt.name },
+                    .{ att.name, stmt.name },
                 );
                 return Error.NotSupported;
             }
@@ -401,20 +399,20 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
             .star => {
                 scalarNodes.ensureTotalCapacity(
                     p.alloc,
-                    scalarNodes.capacity + input_node.descr.attrs.len - 1,
+                    scalarNodes.capacity + input_node.descr.len() - 1,
                 ) catch oom();
                 aliases.ensureTotalCapacity(
                     p.alloc,
-                    scalarNodes.capacity + input_node.descr.attrs.len - 1,
+                    scalarNodes.capacity + input_node.descr.len() - 1,
                 ) catch oom();
 
-                for (input_node.descr.attrs.items(.name)) |name| {
+                for (input_node.descr.attrs.items) |att| {
                     const node = try p.planExpression(
-                        .{ .variable = name },
+                        .{ .variable = att.name },
                         input_node.descr,
                     );
                     scalarNodes.appendAssumeCapacity(node);
-                    aliases.appendAssumeCapacity(name);
+                    aliases.appendAssumeCapacity(att.name);
                 }
             },
         }
@@ -623,12 +621,9 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
     var new_descr = p.make(lhs.descr.clone(p.alloc));
     new_descr.attrs.ensureUnusedCapacity(
         p.alloc,
-        rhs.descr.attrs.len,
+        rhs.descr.len(),
     ) catch oom();
-    const slice = rhs.descr.attrs.slice();
-    for (slice.items(.name), slice.items(.t)) |name, t| {
-        new_descr.attrs.appendAssumeCapacity(.{ .name = name, .t = t });
-    }
+    new_descr.attrs.appendSliceAssumeCapacity(rhs.descr.attrs.items);
     new_descr.has_extended = need_extended;
     // Plan the join condition
     const cond = if (join.cond) |c|
@@ -741,21 +736,21 @@ fn planValues(
     // Go through all the rows in the query
     for (values) |row| {
         // Check the row lengths
-        if (row.columns.len != cxt.attrs.len) {
+        if (row.columns.len != cxt.len()) {
             p.addError(
                 "Expected {} values but got {}",
-                .{ cxt.attrs.len, row.columns.len },
+                .{ cxt.len(), row.columns.len },
             );
             return Error.Other;
         }
 
         // Build the tuple
         var b = common.MemTuple.Builder.init(p.alloc, cxt);
-        for (row.columns, cxt.attrs.items(.t)) |expr, t| {
+        for (row.columns, cxt.attrs.items) |expr, att| {
             const val = try p.evalConstExpression(expr, cxt);
             // Check the type of the value
-            if (!val.t.convertsTo(t)) {
-                p.addError("Expected type {} but got {}", .{ t, val });
+            if (!val.t.convertsTo(att.t)) {
+                p.addError("Expected type {} but got {}", .{ att.t, val });
                 return Error.TypeError;
             }
             b.pushValue(val.v);
@@ -783,7 +778,7 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
                 return Error.UnknownName;
             }
             // Construct the scalar node
-            return cxt.attrs.get(col_id.?).t;
+            return cxt.attrs.items[col_id.?].t;
         },
         .integer => return .const_int,
         .string => return .text,

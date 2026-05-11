@@ -481,13 +481,12 @@ pub fn build(self: *CatalogCache) !void {
     // Go through all the tables and their attributes and fill zdb_attrs
     for (std.enums.values(tables.TableId)) |rel_id| {
         const d = tables.descriptor(rel_id);
-        const slice = d.attrs.slice();
-        for (slice.items(.t), slice.items(.name), 0..) |dbtype, name, i| {
+        for (d.attrs.items, 0..) |att, i| {
             try self.catalog.zdb_attrs.add(self.storage_cache, .{
                 .attr_rel_id = @intFromEnum(rel_id),
                 .attr_id = @intCast(i),
-                .attr_type = @intFromEnum(dbtype),
-                .attr_name = .makeRaw(name),
+                .attr_type = @intFromEnum(att.t),
+                .attr_name = .makeRaw(att.name),
             }, .frozen);
         }
     }

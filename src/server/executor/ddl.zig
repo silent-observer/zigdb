@@ -54,16 +54,15 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
     );
 
     // Go through all attributes
-    const slice = stmt.descr.attrs.slice();
-    for (slice.items(.name), slice.items(.t), 0..) |name, t, i| {
+    for (stmt.descr.attrs.items, 0..) |att, i| {
         // Add a row for each to zdb_attrs catalog table
         try s.catalog_cache.catalog.zdb_attrs.add(
             s.shared.storage_cache,
             .{
                 .attr_id = @intCast(i),
                 .attr_rel_id = table_id,
-                .attr_name = .makeRaw(name),
-                .attr_type = @intFromEnum(t),
+                .attr_name = .makeRaw(att.name),
+                .attr_type = @intFromEnum(att.t),
             },
             s.current_tid.real,
         );

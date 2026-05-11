@@ -130,7 +130,7 @@ pub const AttributeDescriptor = struct {
 /// A descriptor of a tuple (or table).
 /// Contains types and names of all attributes.
 pub const TupleDescriptor = struct {
-    attrs: std.MultiArrayList(AttributeDescriptor) = .empty,
+    attrs: std.ArrayList(AttributeDescriptor) = .empty,
     /// Does the tuple contain extended attributes? (xmin, xmax, pos etc.)
     has_extended: bool = false,
 
@@ -143,13 +143,17 @@ pub const TupleDescriptor = struct {
         .has_extended = true,
     };
 
+    pub fn len(self: *const TupleDescriptor) usize {
+        return self.attrs.items.len;
+    }
+
     /// Clone the TupleDescriptor.
     pub fn clone(self: *const TupleDescriptor, gpa: std.mem.Allocator) TupleDescriptor {
         const new: TupleDescriptor = .{
             .attrs = self.attrs.clone(gpa) catch oom(),
         };
-        for (new.attrs.items(.name)) |*name| {
-            name.* = gpa.dupe(u8, name.*) catch oom();
+        for (new.attrs.items) |*att| {
+            att.name = gpa.dupe(u8, att.name) catch oom();
         }
         return new;
     }
@@ -157,19 +161,15 @@ pub const TupleDescriptor = struct {
     /// Are two tuple descriptors the same?
     pub fn eql(lhs: *const TupleDescriptor, rhs: *const TupleDescriptor) bool {
         if (lhs == rhs) return true;
-        if (lhs.attrs.len != rhs.attrs.len) return false;
+        if (lhs.len() != rhs.len()) return false;
         if (lhs.has_extended != rhs.has_extended) return false;
-        const lhs_slice = lhs.attrs.slice();
-        const rhs_slice = rhs.attrs.slice();
         for (
-            lhs_slice.items(.name),
-            lhs_slice.items(.t),
-            rhs_slice.items(.name),
-            rhs_slice.items(.t),
-        ) |lname, lt, rname, rt| {
-            if (!std.mem.eql(u8, lname, rname))
+            lhs.attrs.items,
+            rhs.attrs.items,
+        ) |l, r| {
+            if (!std.mem.eql(u8, l.name, r.name))
                 return false;
-            if (lt != rt)
+            if (l.t != r.t)
                 return false;
         }
         return true;
@@ -179,8 +179,8 @@ pub const TupleDescriptor = struct {
     /// given the TupleDescriptor.
     pub fn approximateWidth(self: *const TupleDescriptor) usize {
         var width: usize = 0;
-        for (self.attrs.items(.t)) |t| {
-            width += t.approximateWidth();
+        for (self.attrs.items) |att| {
+            width += att.t.approximateWidth();
         }
         return width;
     }
@@ -188,8 +188,8 @@ pub const TupleDescriptor = struct {
     /// Find the index of an attribute given its name.
     /// Returns null if there is no such attribute.
     pub fn findAttribute(self: *const TupleDescriptor, name: []const u8) ?usize {
-        for (self.attrs.items(.name), 0..) |attr_name, i| {
-            if (std.ascii.eqlIgnoreCase(attr_name, name))
+        for (self.attrs.items, 0..) |att, i| {
+            if (std.ascii.eqlIgnoreCase(att.name, name))
                 return i;
         }
         return null;
@@ -198,15 +198,14 @@ pub const TupleDescriptor = struct {
     /// Format the tuple descriptor as JSON.
     pub fn jsonStringify(self: *const TupleDescriptor, jws: anytype) !void {
         try jws.beginArray();
-        const slice = self.attrs.slice();
         if (self.has_extended)
             try jws.write("<extended>");
-        for (slice.items(.name), slice.items(.t)) |name, t| {
+        for (self.attrs.items) |att| {
             try jws.beginObject();
             try jws.objectField("name");
-            try jws.write(name);
+            try jws.write(att.name);
             try jws.objectField("type");
-            try jws.write(t);
+            try jws.write(att.t);
             try jws.endObject();
         }
         try jws.endArray();

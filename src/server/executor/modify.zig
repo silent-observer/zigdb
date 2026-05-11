@@ -118,7 +118,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
     // Temporary tuple for updates
     const temp_tuple = cxt.alloc.alloc(
         common.Value,
-        stmt.root.descr.attrs.len,
+        stmt.root.descr.len(),
     ) catch oom();
     defer cxt.alloc.free(temp_tuple);
 

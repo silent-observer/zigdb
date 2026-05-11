@@ -153,7 +153,7 @@ const HeapTuple = struct {
         pos: MemTuple.Pos,
     ) MemTuple {
         std.debug.assert(descr.has_extended);
-        std.debug.assert(self.ptr.h.count == descr.attrs.len);
+        std.debug.assert(self.ptr.h.count == descr.len());
         const d = self.details();
         const mem_tuple_size = @sizeOf(MemTuple.Header) +
             @sizeOf(MemTuple.ExtendedFields) +
