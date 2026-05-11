@@ -471,6 +471,8 @@ pub fn build(self: *CatalogCache) !void {
 
     // Go through all the tables and fill zdb_rels
     for (std.enums.values(tables.TableId)) |id| {
+        if (@intFromEnum(id) >= @intFromEnum(tables.TableId.start_fake_tables))
+            continue;
         try self.catalog.zdb_rels.add(self.storage_cache, .{
             .rel_id = @intFromEnum(id),
             .rel_name = .makeRaw(@tagName(id)),
@@ -480,6 +482,8 @@ pub fn build(self: *CatalogCache) !void {
 
     // Go through all the tables and their attributes and fill zdb_attrs
     for (std.enums.values(tables.TableId)) |rel_id| {
+        if (@intFromEnum(rel_id) >= @intFromEnum(tables.TableId.start_fake_tables))
+            continue;
         const d = tables.descriptor(rel_id);
         for (d.attrs.items, 0..) |att, i| {
             try self.catalog.zdb_attrs.add(self.storage_cache, .{

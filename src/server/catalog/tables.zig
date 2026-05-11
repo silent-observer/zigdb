@@ -42,6 +42,8 @@ const oom = common.oom;
 pub const TableId = enum(common.ids.TableId) {
     zdb_rels = 1,
     zdb_attrs = 2,
+    // All tables after this one are not real
+    start_fake_tables,
     // This is not actually catalog, simply a well-defined descriptor for
     // possibly many different toast tables.
     toast_table,
