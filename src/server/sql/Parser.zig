@@ -568,9 +568,37 @@ fn parseRollback(p: *Parser) ast.Statement {
 fn parseType(p: *Parser) InternalError!DBType {
     const t = p.peek();
     if (t.keyword()) |kw| switch (kw) {
-        .int => {
+        .int1 => {
+            p.pos += 1;
+            return .int1;
+        },
+        .int2 => {
+            p.pos += 1;
+            return .int2;
+        },
+        .int, .int4 => {
             p.pos += 1;
             return .int4;
+        },
+        .int8 => {
+            p.pos += 1;
+            return .int8;
+        },
+        .uint1 => {
+            p.pos += 1;
+            return .uint1;
+        },
+        .uint2 => {
+            p.pos += 1;
+            return .uint2;
+        },
+        .uint4 => {
+            p.pos += 1;
+            return .uint4;
+        },
+        .uint8 => {
+            p.pos += 1;
+            return .uint8;
         },
         .boolean => {
             p.pos += 1;
