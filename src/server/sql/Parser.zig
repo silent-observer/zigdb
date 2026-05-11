@@ -383,11 +383,12 @@ fn parseDataSourceList(p: *Parser) ast.DataSource {
 
 /// Parse a data source.
 /// ```
-/// DataSource = AtomicDataSource (JoinOp AtomicDataSource "ON" Expression)*
-/// JoinOp = "INNER"? "JOIN"
-///        | "LEFT" "JOIN"
-///        | "RIGHT" "JOIN"
-///        | "FULL" "JOIN"
+/// DataSource = AtomicDataSource JoinOp*
+/// JoinOp = "INNER"? "JOIN" AtomicDataSource "ON" Expression
+///        | "LEFT" "JOIN" AtomicDataSource "ON" Expression
+///        | "RIGHT" "JOIN" AtomicDataSource "ON" Expression
+///        | "FULL" "JOIN" AtomicDataSource "ON" Expression
+///        | "CROSS" "JOIN" AtomicDataSource
 /// ```
 fn parseDataSource(p: *Parser) ast.DataSource {
     var lhs = p.parseAtomicDataSource();
@@ -397,19 +398,22 @@ fn parseDataSource(p: *Parser) ast.DataSource {
             .left => .left,
             .right => .right,
             .full => .full,
+            .cross => .cross,
             else => break,
         } else break;
 
         switch (p.peek().keyword().?) {
             .join => {},
-            .inner, .left, .right, .full => p.advance(),
+            .inner, .left, .right, .full, .cross => p.advance(),
             else => unreachable,
         }
         p.expectKeyword(.join) catch return .err;
 
         const rhs = p.parseAtomicDataSource();
-        p.expectKeyword(.on) catch return .err;
-        const cond = p.make(p.parseExpression());
+        const cond = if (kind != .cross) cond: {
+            p.expectKeyword(.on) catch return .err;
+            break :cond p.make(p.parseExpression());
+        } else null;
 
         const new = ast.DataSource{ .join = .{
             .kind = kind,

@@ -41,6 +41,7 @@ pub const Token = struct {
         left,
         right,
         full,
+        cross,
         where,
         @"union",
         all,
