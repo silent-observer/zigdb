@@ -427,19 +427,46 @@ fn parseDataSource(p: *Parser) ast.DataSource {
 }
 
 /// Parse an atomic data source: either a table or a parenthesized expression
-/// AtomicDataSource = Name
-///                  | "(" DataSource ")"
+/// AtomicDataSource = Name ("AS"? Name)?
+///                  | "(" DataSource ")" ("AS"? Name)?
 fn parseAtomicDataSource(p: *Parser) ast.DataSource {
     const t = p.peek();
     switch (t.kind) {
-        .id => return .{
-            .table = .{ .name = p.parseName() catch return .err },
+        .id => {
+            const name = p.parseName() catch return .err;
+            const has_alias =
+                p.peek().kind == .id or
+                p.eat(.{ .keyword = .as });
+            const table_alias = if (has_alias)
+                p.parseName() catch return .err
+            else
+                null;
+            return .{
+                .table = .{
+                    .name = name,
+                    .alias = table_alias,
+                },
+            };
         },
         .symbol => |s| switch (s) {
             .lparen => {
                 p.advance();
-                const ds = p.parseDataSource();
+                var ds = p.parseDataSource();
                 p.expectSymbol(.rparen) catch return .err;
+                const has_alias =
+                    p.peek().kind == .id or
+                    p.eat(.{ .keyword = .as });
+                const table_alias = if (has_alias)
+                    p.parseName() catch return .err
+                else
+                    null;
+                if (table_alias) |ta| {
+                    switch (ds) {
+                        .table => ds.table.alias = ta,
+                        .join => ds.join.alias = ta,
+                        .err => {},
+                    }
+                }
                 return ds;
             },
             else => {},

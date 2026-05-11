@@ -140,6 +140,7 @@ pub const DataSource = union(enum) {
 
     pub const Table = struct {
         name: Name,
+        alias: ?Name = null,
     };
 
     pub const Join = struct {
@@ -147,6 +148,7 @@ pub const DataSource = union(enum) {
         lhs: *DataSource,
         rhs: *DataSource,
         cond: ?*Expression,
+        alias: ?Name = null,
 
         pub const Kind = enum {
             cross,

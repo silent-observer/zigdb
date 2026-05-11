@@ -634,6 +634,12 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
     const table_id = try p.findTable(table.name);
     // Find its descriptor
     const descr = p.make(p.cat.descr.get(table_id.rel_id).?);
+    // Change table alias if we have one
+    if (table.alias) |ta| {
+        descr.* = descr.clone(p.alloc);
+        for (descr.attrs.items) |*att|
+            att.table_name = ta;
+    }
     // Build the data source node
     return p.make(Plan.DataNode{
         .descr = descr,
@@ -656,6 +662,11 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
     ) catch oom();
     new_descr.attrs.appendSliceAssumeCapacity(rhs.descr.attrs.items);
     new_descr.has_extended = need_extended;
+    // Change table alias if we have one
+    if (join.alias) |ta| {
+        for (new_descr.attrs.items) |*att|
+            att.table_name = ta;
+    }
     // Plan the join condition
     const cond = if (join.cond) |c|
         p.make(try p.planExpression(c.*, new_descr))
