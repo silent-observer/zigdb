@@ -236,14 +236,22 @@ fn parseSelect(p: *Parser) ast.Statement {
 /// Parse a column expression
 /// ```
 /// ColumnExpression = Expression ("AS" Name)?
+///                  | "*"
 /// ```
 fn parseColumnExpression(p: *Parser) !ast.Statement.Select.ColumnExpression {
+    if (p.eat(.{ .symbol = .star })) {
+        return .star;
+    }
+
     const expr = p.make(p.parseExpression());
     const alias = if (p.eat(.{ .keyword = .as }))
         try p.parseName()
     else
         null;
-    return .{ .expr = expr, .alias = alias };
+    return .{ .normal = .{
+        .expr = expr,
+        .alias = alias,
+    } };
 }
 
 /// Parse a DELETE statement

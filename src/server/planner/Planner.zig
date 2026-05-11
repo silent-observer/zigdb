@@ -384,11 +384,40 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     // List of scalar nodes for expressions
     var scalarNodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.len) catch oom();
+    var aliases =
+        std.ArrayList([]const u8).initCapacity(p.alloc, stmt.columns.len) catch oom();
     // Go through output columns in the query
     for (stmt.columns) |c| {
         // Build a scalar node for each expression
-        const node = try p.planExpression(c.expr.*, input_node.descr);
-        scalarNodes.appendAssumeCapacity(node);
+        switch (c) {
+            .normal => |n| {
+                const node = try p.planExpression(n.expr.*, input_node.descr);
+                scalarNodes.appendAssumeCapacity(node);
+                if (n.alias) |a|
+                    aliases.appendAssumeCapacity(a)
+                else
+                    aliases.appendAssumeCapacity(try p.suggestExpressionName(n.expr.*));
+            },
+            .star => {
+                scalarNodes.ensureTotalCapacity(
+                    p.alloc,
+                    scalarNodes.capacity + input_node.descr.attrs.len - 1,
+                ) catch oom();
+                aliases.ensureTotalCapacity(
+                    p.alloc,
+                    scalarNodes.capacity + input_node.descr.attrs.len - 1,
+                ) catch oom();
+
+                for (input_node.descr.attrs.items(.name)) |name| {
+                    const node = try p.planExpression(
+                        .{ .variable = name },
+                        input_node.descr,
+                    );
+                    scalarNodes.appendAssumeCapacity(node);
+                    aliases.appendAssumeCapacity(name);
+                }
+            },
+        }
     }
 
     // This is the input data
@@ -416,11 +445,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
         // Build the description
         const new_descr = p.make(common.TupleDescriptor.empty);
         new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
-        for (stmt.columns, scalarNodes.items) |c, n| {
-            const name = if (c.alias) |alias|
-                alias
-            else
-                try p.suggestExpressionName(c.expr.*);
+        for (scalarNodes.items, aliases.items) |n, name| {
             new_descr.attrs.appendAssumeCapacity(.{
                 .name = name,
                 .t = n.dbtype,

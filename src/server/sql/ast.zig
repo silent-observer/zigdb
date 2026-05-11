@@ -24,9 +24,14 @@ pub const Statement = union(enum) {
         source: *DataSource,
         where: ?*Expression,
 
-        pub const ColumnExpression = struct {
-            expr: *Expression,
-            alias: ?Name,
+        pub const ColumnExpression = union(enum) {
+            normal: Normal,
+            star: void,
+
+            pub const Normal = struct {
+                expr: *Expression,
+                alias: ?Name,
+            };
         };
     };
 
