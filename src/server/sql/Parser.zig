@@ -834,8 +834,7 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         },
         .str => {
             const raw = t.text(p.input);
-            var arr = std.ArrayList(u8).initCapacity(p.alloc, raw.len + 1) catch oom();
-            arr.appendAssumeCapacity(0); // Mandatory 0 start
+            var arr = std.ArrayList(u8).initCapacity(p.alloc, raw.len) catch oom();
             var i: usize = 0;
             while (i < raw.len) {
                 if (raw[i] == '\\') {
@@ -847,7 +846,7 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                         '"' => '"',
                         '\\' => '\\',
                         else => {
-                            p.addError(t, "Invalid escale sequence \"\\{}\"", .{raw[i + 1]});
+                            p.addError(t, "Invalid escape sequence \"\\{}\"", .{raw[i + 1]});
                             return .err;
                         },
                     };
