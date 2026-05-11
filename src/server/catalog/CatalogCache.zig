@@ -100,6 +100,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
             descr.attrs.append(self.gpa, .{
                 .name = attr.attr_name.text(),
                 .t = @enumFromInt(attr.attr_type),
+                .table_name = rel.rel_name.text(),
             }) catch oom();
         }
         // Put it in the cache

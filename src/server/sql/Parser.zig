@@ -847,7 +847,7 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 ///                  | STRING
 ///                  | "true"
 ///                  | "false"
-///                  | Name
+///                  | Name ('.' Name)?
 /// ```
 fn parseAtomicExpression(p: *Parser) ast.Expression {
     const t = p.peek();
@@ -912,7 +912,21 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
             return .{ .string = .{ .raw = arr.toOwnedSlice(p.alloc) catch oom() } };
         },
         .id => {
-            return .{ .variable = p.parseName() catch return .err };
+            const first = p.parseName() catch return .err;
+            const second = if (p.eat(.{ .symbol = .dot }))
+                p.parseName() catch return .err
+            else
+                null;
+            if (second) |s|
+                return .{ .variable = .{
+                    .table = first,
+                    .name = s,
+                } }
+            else
+                return .{ .variable = .{
+                    .table = null,
+                    .name = first,
+                } };
         },
         else => {
             p.addError(

@@ -125,6 +125,7 @@ pub const DBType = enum(u32) {
 pub const AttributeDescriptor = struct {
     t: DBType,
     name: []const u8,
+    table_name: []const u8,
 };
 
 /// A descriptor of a tuple (or table).
@@ -183,16 +184,6 @@ pub const TupleDescriptor = struct {
             width += att.t.approximateWidth();
         }
         return width;
-    }
-
-    /// Find the index of an attribute given its name.
-    /// Returns null if there is no such attribute.
-    pub fn findAttribute(self: *const TupleDescriptor, name: []const u8) ?usize {
-        for (self.attrs.items, 0..) |att, i| {
-            if (std.ascii.eqlIgnoreCase(att.name, name))
-                return i;
-        }
-        return null;
     }
 
     /// Format the tuple descriptor as JSON.

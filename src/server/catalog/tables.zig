@@ -191,6 +191,7 @@ fn fillDescriptors(gpa: std.mem.Allocator) std.EnumArray(TableId, common.TupleDe
             descr.attrs.appendAssumeCapacity(.{
                 .name = @tagName(a.id),
                 .t = a.db_type,
+                .table_name = @tagName(r.id),
             });
         }
         result.set(r.id, descr);

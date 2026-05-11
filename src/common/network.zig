@@ -156,6 +156,7 @@ pub const Message = union(Tag) {
                     attrs.appendAssumeCapacity(t.AttributeDescriptor{
                         .t = dbtype,
                         .name = name,
+                        .table_name = "",
                     });
                 }
                 const descr = alloc.create(t.TupleDescriptor) catch oom();

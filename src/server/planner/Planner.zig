@@ -21,6 +21,7 @@ errors: std.ArrayList([]const u8),
 pub const Error = error{
     NotSupported,
     UnknownName,
+    AmbiguousName,
     NotAConstant,
     TypeError,
     Other,
@@ -72,6 +73,7 @@ fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Sta
         descr.attrs.appendAssumeCapacity(.{
             .name = c.name,
             .t = c.col_type,
+            .table_name = stmt.name,
         });
     }
 
@@ -136,6 +138,25 @@ fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement
     } });
 }
 
+/// Find the index of an attribute given its name.
+/// Returns null if there is no such attribute.
+pub fn findAttribute(p: *Planner, td: *const common.TupleDescriptor, v: ast.Expression.Variable) Error!?usize {
+    var result: ?usize = null;
+    for (td.attrs.items, 0..) |att, i| {
+        if (v.table) |tn|
+            if (!std.ascii.eqlIgnoreCase(att.table_name, tn))
+                continue;
+        if (std.ascii.eqlIgnoreCase(att.name, v.name)) {
+            if (result != null) {
+                p.addError("Name \"{s}\" is ambiguous, please specify a table", .{att.name});
+                return Error.AmbiguousName;
+            }
+            result = i;
+        }
+    }
+    return result;
+}
+
 /// Plan INSERT VALUES statement
 fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.Statement {
     // Find the target table
@@ -160,7 +181,10 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         // Go through the columns in the statement
         for (stmt.columns, 0..) |col_name, i| {
             // col_id is the index in the physical table, i is the index in the query
-            const col_id = full_descr.findAttribute(col_name);
+            const col_id = try p.findAttribute(
+                full_descr,
+                .{ .name = col_name },
+            );
             if (col_id == null) {
                 p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ col_name, stmt.name });
                 return Error.UnknownName;
@@ -247,7 +271,7 @@ fn evalConstExpression(
 
     switch (expr) {
         .variable => |v| {
-            p.addError("Cannot use variable \"{s}\" as a constant", .{v});
+            p.addError("Cannot use variable \"{s}\" as a constant", .{v.name});
             return Error.NotAConstant;
         },
         .integer => |i| return common.TypedValue{
@@ -363,7 +387,7 @@ fn evalConstExpression(
 /// Suggest a name for the column if no explicit alias is given
 fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
     switch (expr) {
-        .variable => |v| return v,
+        .variable => |v| return v.name,
         .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
         .boolean => |b| return if (b) "t" else "f",
         .null => return "null",
@@ -408,7 +432,10 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 
                 for (input_node.descr.attrs.items) |att| {
                     const node = try p.planExpression(
-                        .{ .variable = att.name },
+                        .{ .variable = .{
+                            .name = att.name,
+                            .table = att.table_name,
+                        } },
                         input_node.descr,
                     );
                     scalarNodes.appendAssumeCapacity(node);
@@ -447,6 +474,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
             new_descr.attrs.appendAssumeCapacity(.{
                 .name = name,
                 .t = n.dbtype,
+                .table_name = "",
             });
         }
 
@@ -565,7 +593,10 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
         .initCapacity(p.alloc, stmt.clauses.len) catch oom();
 
     for (stmt.clauses) |clause| {
-        const col_id = root.descr.findAttribute(clause.column);
+        const col_id = try p.findAttribute(
+            root.descr,
+            .{ .name = clause.column },
+        );
         if (col_id == null) {
             p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column, stmt.name });
             return Error.UnknownName;
@@ -772,9 +803,9 @@ fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDesc
     switch (expr) {
         .variable => |v| { // Variable expression
             // Find the column
-            const col_id = cxt.findAttribute(v);
+            const col_id = try p.findAttribute(cxt, v);
             if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v});
+                p.addError("Can't find variable \"{s}\"", .{v.name});
                 return Error.UnknownName;
             }
             // Construct the scalar node
@@ -857,9 +888,9 @@ fn planExpression(
     switch (expr) {
         .variable => |v| { // Variable expression
             // Find the column
-            const col_id = cxt.findAttribute(v);
+            const col_id = try p.findAttribute(cxt, v);
             if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v});
+                p.addError("Can't find variable \"{s}\"", .{v.name});
                 return Error.UnknownName;
             }
             // Construct the scalar node

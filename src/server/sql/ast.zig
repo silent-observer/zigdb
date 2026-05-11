@@ -85,7 +85,7 @@ pub const ValueList = struct {
 };
 
 pub const Expression = union(enum) {
-    variable: Name,
+    variable: Variable,
     unary: Unary,
     binary: Binary,
     integer: i64,
@@ -93,6 +93,11 @@ pub const Expression = union(enum) {
     boolean: bool,
     null: void,
     err: void,
+
+    pub const Variable = struct {
+        name: []const u8,
+        table: ?[]const u8 = null,
+    };
 
     pub const Binary = struct {
         op: Op,
