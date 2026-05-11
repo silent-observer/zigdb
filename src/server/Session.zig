@@ -64,7 +64,7 @@ pub fn get() *Session {
 }
 
 /// Execute a single statement
-pub fn executeStmt(query: []const u8) !void {
+pub fn executeStmt(query: []const u8) !bool {
     const s = get();
     // Temporary arena for this statement
     var arena = std.heap.ArenaAllocator.init(s.gpa);
@@ -80,7 +80,7 @@ pub fn executeStmt(query: []const u8) !void {
     s.catalog_cache.rebuild(&catalog_snapshot) catch |e| {
         Logger.err("Couldn't build catalog cache: {}\n", .{e});
         try s.sender.send(.err);
-        return;
+        return false;
     };
 
     // Lex the query
@@ -88,17 +88,21 @@ pub fn executeStmt(query: []const u8) !void {
     if (parser.lex(query)) |e| {
         Logger.err("{}", .{e});
         try s.sender.send(.err);
-        return;
+        return false;
     }
 
     // Parse the query
     const stmt = parser.parse();
+    if (parser.incomplete) {
+        try s.sender.send(.incomplete);
+        return true;
+    }
     for (parser.errors.items) |e| {
         Logger.err("{s}", .{e});
     }
     if (parser.errors.items.len > 0) {
         try s.sender.send(.err);
-        return;
+        return false;
     }
 
     Logger.printPayload(.log, "AST", .{}, stmt);
@@ -110,7 +114,7 @@ pub fn executeStmt(query: []const u8) !void {
             Logger.err("{s}", .{e});
         }
         try s.sender.send(.err);
-        return;
+        return false;
     };
 
     Logger.printPayload(.log, "Plan", .{}, plan);
@@ -146,7 +150,7 @@ pub fn executeStmt(query: []const u8) !void {
             try s.sender.send(.err);
             if (s.explicit_transaction == .active)
                 s.explicit_transaction = .broken;
-            return;
+            return false;
         };
 
         if (s.explicit_transaction == .inactive) {
@@ -162,5 +166,6 @@ pub fn executeStmt(query: []const u8) !void {
 
         // Send the success message
         try s.sender.send(.{ .success = message });
+        return false;
     }
 }

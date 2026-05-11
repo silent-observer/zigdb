@@ -34,6 +34,8 @@ async def read_until_prompt(stdout: asyncio.StreamReader) -> str:
         output += (await stdout.read(1024)).decode()
         if output.endswith('> '):
             return output.removesuffix('> ')
+        if output.endswith('| '):
+            return output.removesuffix('| ')
 
 async def run_test(test: str) -> str:
     with (

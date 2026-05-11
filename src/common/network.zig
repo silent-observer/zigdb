@@ -57,6 +57,7 @@ pub const Message = union(Tag) {
     query: []const u8,
     success: []const u8,
     err: void,
+    incomplete: void,
     ready: void,
     tuple_descriptor: *const t.TupleDescriptor,
     tuple: MemTuple,
@@ -67,6 +68,7 @@ pub const Message = union(Tag) {
         query = 'Q',
         success = 'S',
         err = 'E',
+        incomplete = 'I',
         ready = 'R',
         tuple_descriptor = 'D',
         tuple = 'T',
@@ -87,7 +89,7 @@ pub const Message = union(Tag) {
                 }
                 break :size total_size;
             },
-            .err, .ready, .exit => 0,
+            .err, .ready, .exit, .incomplete => 0,
         };
     }
 
@@ -114,7 +116,7 @@ pub const Message = union(Tag) {
                     try w.writeAll(name);
                 }
             },
-            .err, .ready, .exit => {},
+            .err, .ready, .exit, .incomplete => {},
         }
     }
 
@@ -165,6 +167,7 @@ pub const Message = union(Tag) {
                 return .{ .tuple_descriptor = descr };
             },
             .err => return .err,
+            .incomplete => return .incomplete,
             .ready => return .ready,
             .exit => return .exit,
         }

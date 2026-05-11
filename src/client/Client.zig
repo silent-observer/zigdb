@@ -101,12 +101,12 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
         // Received a log message from server
         .log => |l| try stdout.print("{s}\n", .{l}),
         // Ready to send a new query
-        .ready => {
+        .ready, .incomplete => {
             // Delete the last table we got
             self.table.reset();
             // Print prompt
             if (self.config.prompt)
-                try stdout.print("> ", .{});
+                try stdout.writeAll(if (m == .ready) "> " else "| ");
             try stdout.flush();
             // Read one line from stdin to line writer
             _ = try self.stdin_reader.interface.streamDelimiterEnding(

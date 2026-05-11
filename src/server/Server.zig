@@ -11,6 +11,8 @@ const Server = @This();
 gpa: std.mem.Allocator,
 /// Arena allocator that lives only for the lifetime of one message.
 arena: std.heap.ArenaAllocator,
+/// Query array
+query: std.ArrayList(u8),
 
 network_in_buffer: []u8,
 network_out_buffer: []u8,
@@ -31,6 +33,7 @@ pub fn init(
     s.* = Server{
         .gpa = gpa,
         .arena = .init(gpa),
+        .query = .empty,
 
         .network_in_buffer = network_in_buffer,
         .network_out_buffer = network_out_buffer,
@@ -47,6 +50,7 @@ pub fn init(
 /// Deinitialize the server side.
 pub fn deinit(self: *Server) void {
     self.arena.deinit();
+    self.query.deinit(self.gpa);
     self.gpa.free(self.network_in_buffer);
     self.gpa.free(self.network_out_buffer);
     self.gpa.destroy(self);
@@ -74,23 +78,27 @@ pub fn loop(self: *Server) !void {
         );
 
         // Handle the message and possibly exit
-        const exit = try handleMessage(m);
+        const exit = try self.handleMessage(m);
         if (exit)
             break;
     }
 }
 
 /// Handle one message received from the client
-fn handleMessage(m: common.network.Message) !bool {
+fn handleMessage(self: *Server, m: common.network.Message) !bool {
     switch (m) {
         // We got a new query to execute
         .query => |q| {
-            try Session.executeStmt(q);
-            try Session.get().sender.send(.ready);
+            self.query.appendSlice(self.gpa, q) catch common.oom();
+            const incomplete = try Session.executeStmt(self.query.items);
+            if (!incomplete) {
+                self.query.clearRetainingCapacity();
+                try Session.get().sender.send(.ready);
+            } else self.query.append(self.gpa, '\n') catch common.oom();
         },
         // Time to close the connection
         .exit => return true,
-        .err, .success, .log, .ready, .tuple_descriptor, .tuple => unreachable,
+        .err, .success, .log, .ready, .tuple_descriptor, .tuple, .incomplete => unreachable,
     }
     return false;
 }

@@ -16,6 +16,7 @@ input: []const u8, // Input text
 tokens: std.MultiArrayList(Lexer.Token), // List of tokens
 pos: usize, // Current position in the list of tokens
 errors: std.ArrayList([]const u8), // List of parsing errors (as text)
+incomplete: bool,
 
 /// Initialize the parser
 pub fn init(alloc: std.mem.Allocator) Parser {
@@ -25,6 +26,7 @@ pub fn init(alloc: std.mem.Allocator) Parser {
         .tokens = .empty,
         .pos = 0,
         .errors = .empty,
+        .incomplete = false,
     };
 }
 
@@ -32,7 +34,7 @@ pub fn init(alloc: std.mem.Allocator) Parser {
 /// Must be done before parsing.
 pub fn lex(p: *Parser, input: []const u8) ?Lexer.Error {
     var lexer = Lexer.init(p.alloc, input);
-    if (lexer.lex()) |err| return err;
+    if (lexer.lex()) |e| return e;
     p.input = input;
     p.tokens = lexer.finalize();
     return null;
@@ -102,6 +104,12 @@ const InternalError = error{
     UnexpectedToken,
 };
 
+fn makeErr(p: *Parser, t: Lexer.Token) InternalError!noreturn {
+    if (t.kind == .eof)
+        p.incomplete = true;
+    return InternalError.UnexpectedToken;
+}
+
 /// Look at the current token and advance if it is what we expect.
 /// Throw an error if it doesn't match.
 fn expect(p: *Parser, kind: Lexer.Token.Kind) InternalError!void {
@@ -111,7 +119,8 @@ fn expect(p: *Parser, kind: Lexer.Token.Kind) InternalError!void {
             "Expected {} but got \"{s}\"",
             .{ kind, p.peek().text(p.input) },
         );
-        return InternalError.UnexpectedToken;
+
+        try p.makeErr(p.peek());
     }
 }
 
@@ -124,7 +133,8 @@ fn expectKeyword(p: *Parser, kw: Lexer.Token.Keyword) InternalError!void {
             "Expected {s} but got \"{s}\"",
             .{ @tagName(kw), p.peek().text(p.input) },
         );
-        return InternalError.UnexpectedToken;
+
+        try p.makeErr(p.peek());
     }
 }
 
@@ -137,7 +147,8 @@ fn expectSymbol(p: *Parser, s: Lexer.Token.Symbol) InternalError!void {
             "Expected \"{s}\" but got \"{s}\"",
             .{ s.text(), p.peek().text(p.input) },
         );
-        return InternalError.UnexpectedToken;
+
+        try p.makeErr(p.peek());
     }
 }
 
@@ -633,7 +644,7 @@ fn parseType(p: *Parser) InternalError!DBType {
         "Expected a type but got \"{s}\"",
         .{t.text(p.input)},
     );
-    return InternalError.UnexpectedToken;
+    try p.makeErr(t);
 }
 
 /// This parses an expression. Expressions use a Pratt parser
@@ -925,6 +936,6 @@ fn parseName(p: *Parser) !ast.Name {
             "Expected a name but got \"{s}\"",
             .{t.text(p.input)},
         );
-        return InternalError.UnexpectedToken;
+        try p.makeErr(t);
     }
 }
