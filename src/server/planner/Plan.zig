@@ -111,6 +111,16 @@ pub const DataNode = struct {
             input: *DataNode,
             /// Expressions to execute and return
             exprs: []ScalarNode,
+            /// Special operation to perform
+            op: Op,
+
+            pub const Op = enum {
+                evaluate, // Evaluate all the expressions
+                copy, // Simply copy the input tuple
+                // All the missing attributes are assumed to be at the start of the tuple,
+                // and they are filled with NULLs
+                prepend_nulls,
+            };
         };
 
         /// Filters input data, only leaving rows that fit the condition.
@@ -136,6 +146,8 @@ pub const DataNode = struct {
             rhs: *DataNode,
             /// Join condition
             cond: ?*ScalarNode,
+            /// What kind of tuple should we output?
+            output: OutputFormat,
 
             pub const Op = enum {
                 cross, // No condition to check
@@ -143,6 +155,12 @@ pub const DataNode = struct {
                 left, // Same as inner, plus left tuples with no match
                 semi, // All left tuples that have at least one match
                 anti_semi, // All left tuples that have no matches
+            };
+
+            pub const OutputFormat = enum {
+                left_right,
+                right_left,
+                left_only,
             };
         };
     };

@@ -45,20 +45,32 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
 
     // Build our new tuple
     var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
-    if (plan.action.project.exprs.len == 0) {
-        // Special case: simply copy data from input
-        for (0..input.?.len()) |i| {
-            b.pushValue(input.?.getValue(i));
-        }
-    } else {
-        // Go through our expressions
-        for (plan.action.project.exprs) |expr| {
-            // Evaluate each one and add the result to the output tuple
-            const v = try scalar.eval(&expr, input.?, cxt);
-            b.pushValue(v);
-        }
+    switch (plan.action.project.op) {
+        .evaluate => {
+            // Go through our expressions
+            for (plan.action.project.exprs) |expr| {
+                // Evaluate each one and add the result to the output tuple
+                const v = try scalar.eval(&expr, input.?, cxt);
+                b.pushValue(v);
+            }
+        },
+        .copy => {
+            // Special case: simply copy data from input
+            for (0..input.?.len()) |i| {
+                b.pushValue(input.?.getValue(i));
+            }
+        },
+        .prepend_nulls => {
+            // Special case: fill input with nulls
+            for (0..plan.descr.attrs.len - input.?.len()) |_| {
+                b.pushValue(.null);
+            }
+            for (0..input.?.len()) |i| {
+                b.pushValue(input.?.getValue(i));
+            }
+        },
     }
-    // Add extended fields if needed
+
     if (plan.descr.has_extended) {
         std.debug.assert(s.current_tid == .real);
         b.addExtended(.{

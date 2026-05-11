@@ -212,6 +212,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
             .action = .{ .project = .{
                 .input = root,
                 .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
+                .op = if (scalarNodes.items.len > 0) .evaluate else .copy,
             } },
         });
     }
@@ -432,6 +433,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
             .action = .{ .project = .{
                 .input = root,
                 .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
+                .op = .evaluate,
             } },
         });
     }
@@ -617,6 +619,7 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .rhs = rhs,
                 .cond = null,
                 .op = .cross,
+                .output = .left_right,
             } },
         }),
         .inner => p.make(Plan.DataNode{
@@ -626,6 +629,7 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .rhs = rhs,
                 .cond = cond,
                 .op = .inner,
+                .output = .left_right,
             } },
         }),
         .left => p.make(Plan.DataNode{
@@ -635,6 +639,7 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .rhs = rhs,
                 .cond = cond,
                 .op = .left,
+                .output = .left_right,
             } },
         }),
         .right => p.make(Plan.DataNode{
@@ -644,9 +649,46 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .rhs = lhs,
                 .cond = cond,
                 .op = .left,
+                .output = .right_left,
             } },
         }),
-        .full => @panic("TODO: FULL JOIN not supported yet"),
+        .full => out: {
+            const inputs = p.alloc.alloc(Plan.DataNode, 2) catch oom();
+            inputs[0] = Plan.DataNode{
+                .descr = new_descr,
+                .action = .{ .nested_loop = .{
+                    .lhs = lhs,
+                    .rhs = rhs,
+                    .cond = cond,
+                    .op = .left,
+                    .output = .left_right,
+                } },
+            };
+            const anti_semi_join = p.make(Plan.DataNode{
+                .descr = rhs.descr,
+                .action = .{ .nested_loop = .{
+                    .lhs = rhs,
+                    .rhs = lhs,
+                    .cond = cond,
+                    .op = .anti_semi,
+                    .output = .left_only,
+                } },
+            });
+            inputs[1] = Plan.DataNode{
+                .descr = new_descr,
+                .action = .{ .project = .{
+                    .input = anti_semi_join,
+                    .exprs = &.{},
+                    .op = .prepend_nulls,
+                } },
+            };
+            break :out p.make(Plan.DataNode{
+                .descr = new_descr,
+                .action = .{ .union_all = .{
+                    .inputs = inputs,
+                } },
+            });
+        },
     };
 }
 
