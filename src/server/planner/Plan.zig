@@ -91,6 +91,7 @@ pub const DataNode = struct {
         project: Project,
         filter: Filter,
         nested_loop: NestedLoop,
+        union_all: UnionAll,
 
         /// Performs a full scan of some table
         pub const FullScan = struct {
@@ -118,6 +119,12 @@ pub const DataNode = struct {
             input: *DataNode,
             /// Condition to check
             condition: *ScalarNode,
+        };
+
+        /// Outputs rows all sources
+        pub const UnionAll = struct {
+            /// Sequence of inputs
+            inputs: []DataNode,
         };
 
         /// Performs a join using a nested loop

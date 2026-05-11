@@ -48,6 +48,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
         .create_table => return p.planCreateTable(stmt.create_table),
         .drop_table => return p.planDropTable(stmt.drop_table),
         .select => return p.planSelect(stmt.select),
+        .@"union" => return p.planUnion(stmt.@"union"),
         .delete => return p.planDelete(stmt.delete),
         .insert_values => return p.planInsertValues(stmt.insert_values),
         .update => return p.planUpdate(stmt.update),
@@ -437,6 +438,37 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 
     // Make the statement node
     return p.make(Plan.Statement{ .select = .{ .root = root } });
+}
+
+/// Plan UNION statement
+fn planUnion(p: *Planner, stmt: ast.Statement.Union) Error!*Plan.Statement {
+    var sources = std.ArrayList(Plan.DataNode)
+        .initCapacity(p.alloc, stmt.stmts.len) catch oom();
+    for (stmt.stmts) |child| {
+        const child_plan = try p.plan(child);
+        std.debug.assert(child_plan.* == .select);
+        sources.appendAssumeCapacity(child_plan.select.root.*);
+
+        p.alloc.destroy(child_plan.select.root);
+        p.alloc.destroy(child_plan);
+    }
+    std.debug.assert(sources.items.len > 0);
+
+    for (sources.items) |source| {
+        if (!source.descr.eql(sources.items[0].descr)) {
+            p.addError("Two sides of the UNION must match!", .{});
+            return Error.TypeError;
+        }
+    }
+
+    return p.make(Plan.Statement{ .select = .{
+        .root = p.make(Plan.DataNode{
+            .descr = sources.items[0].descr,
+            .action = .{ .union_all = .{
+                .inputs = sources.toOwnedSlice(p.alloc) catch oom(),
+            } },
+        }),
+    } });
 }
 
 /// Plan DELETE statement

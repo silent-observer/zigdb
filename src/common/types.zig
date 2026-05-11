@@ -148,6 +148,27 @@ pub const TupleDescriptor = struct {
         return new;
     }
 
+    /// Are two tuple descriptors the same?
+    pub fn eql(lhs: *const TupleDescriptor, rhs: *const TupleDescriptor) bool {
+        if (lhs == rhs) return true;
+        if (lhs.attrs.len != rhs.attrs.len) return false;
+        if (lhs.has_extended != rhs.has_extended) return false;
+        const lhs_slice = lhs.attrs.slice();
+        const rhs_slice = rhs.attrs.slice();
+        for (
+            lhs_slice.items(.name),
+            lhs_slice.items(.t),
+            rhs_slice.items(.name),
+            rhs_slice.items(.t),
+        ) |lname, lt, rname, rt| {
+            if (!std.mem.eql(u8, lname, rname))
+                return false;
+            if (lt != rt)
+                return false;
+        }
+        return true;
+    }
+
     /// Calculate the approximate width of data in the tuple,
     /// given the TupleDescriptor.
     pub fn approximateWidth(self: *const TupleDescriptor) usize {

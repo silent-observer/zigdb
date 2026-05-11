@@ -42,6 +42,8 @@ pub const Token = struct {
         right,
         full,
         where,
+        @"union",
+        all,
         insert,
         into,
         delete,

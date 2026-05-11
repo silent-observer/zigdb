@@ -157,7 +157,7 @@ pub fn parse(p: *Parser) ast.Statement {
 
 /// Parse a single statement.
 /// ```
-/// Statement = Select
+/// Statement = SelectUnion
 ///           | Insert
 ///           | Delete
 ///           | Update
@@ -171,7 +171,7 @@ pub fn parse(p: *Parser) ast.Statement {
 fn parseStmt(p: *Parser) ast.Statement {
     const t = p.peek();
     if (t.keyword()) |kw| switch (kw) {
-        .select => return p.parseSelect(),
+        .select => return p.parseSelectUnion(),
         .insert => return p.parseInsert(),
         .delete => return p.parseDelete(),
         .update => return p.parseUpdate(),
@@ -192,9 +192,26 @@ fn parseStmt(p: *Parser) ast.Statement {
     return .err;
 }
 
-/// Parse a SELECT statement
+/// Parse a SELECT statement with possible unions
 /// ```
-/// Select = "SELECT" CommaList(ColumnExpression) "FROM" DataSourceList ("WHERE" Expression)? ";"
+/// SelectUnion = Select ("UNION" "ALL" Select)* ";"
+/// ```
+fn parseSelectUnion(p: *Parser) ast.Statement {
+    var sources: std.ArrayList(ast.Statement) = .empty;
+    sources.append(p.alloc, p.parseSelect()) catch oom();
+    while (p.eat(.{ .keyword = .@"union" })) {
+        p.expectKeyword(.all) catch return .err;
+        sources.append(p.alloc, p.parseSelect()) catch oom();
+    }
+    p.expectSymbol(.semi) catch return .err;
+    return .{ .@"union" = .{
+        .stmts = sources.toOwnedSlice(p.alloc) catch oom(),
+    } };
+}
+
+/// Parse a SELECT query
+/// ```
+/// Select = "SELECT" CommaList(ColumnExpression) "FROM" DataSourceList ("WHERE" Expression)?
 /// ```
 fn parseSelect(p: *Parser) ast.Statement {
     p.expectKeyword(.select) catch return .err;
@@ -209,7 +226,6 @@ fn parseSelect(p: *Parser) ast.Statement {
         p.make(p.parseExpression())
     else
         null;
-    p.expectSymbol(.semi) catch return .err;
     return .{ .select = .{
         .columns = columns,
         .source = p.make(source),

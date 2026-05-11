@@ -13,6 +13,7 @@ pub const Statement = union(enum) {
     create_table: CreateTable,
     drop_table: DropTable,
     truncate: Truncate,
+    @"union": Union,
     begin: void,
     commit: void,
     rollback: void,
@@ -67,6 +68,10 @@ pub const Statement = union(enum) {
 
     pub const Truncate = struct {
         name: Name,
+    };
+
+    pub const Union = struct {
+        stmts: []Statement,
     };
 };
 
