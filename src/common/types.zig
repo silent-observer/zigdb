@@ -199,6 +199,8 @@ pub const TupleDescriptor = struct {
     pub fn jsonStringify(self: *const TupleDescriptor, jws: anytype) !void {
         try jws.beginArray();
         const slice = self.attrs.slice();
+        if (self.has_extended)
+            try jws.write("<extended>");
         for (slice.items(.name), slice.items(.t)) |name, t| {
             try jws.beginObject();
             try jws.objectField("name");

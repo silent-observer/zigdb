@@ -1,2 +1,3 @@
 test: basic
 test: locks
+test: joins

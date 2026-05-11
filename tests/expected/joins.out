@@ -1,0 +1,193 @@
+> create table employees (emp_name text, emp_department uint4);
+CREATE TABLE
+> create table departments (dep_id uint4, dep_name text);
+CREATE TABLE
+
+> insert into employees values ('Rafferty',   31),
+> ('Jones',      33),
+> ('Heisenberg', 33),
+> ('Robinson',   34),
+> ('Smith',      34),
+> ('Williams',   null);
+INSERT 6
+
+> insert into departments values (31, 'Sales'),
+> (33, 'Engineering'),
+> (34, 'Clerical'),
+> (35, 'Marketing');
+INSERT 4
+
+> select * from employees;
+  emp_name  | emp_department 
+------------+----------------
+ Rafferty   |             31 
+ Jones      |             33 
+ Heisenberg |             33 
+ Robinson   |             34 
+ Smith      |             34 
+ Williams   |                
+(6 rows)
+
+> select * from departments;
+ dep_id |  dep_name   
+--------+-------------
+     31 | Sales       
+     33 | Engineering 
+     34 | Clerical    
+     35 | Marketing   
+(4 rows)
+
+
+> select * from employees cross join departments;
+  emp_name  | emp_department | dep_id |  dep_name   
+------------+----------------+--------+-------------
+ Rafferty   |             31 |     31 | Sales       
+ Rafferty   |             31 |     33 | Engineering 
+ Rafferty   |             31 |     34 | Clerical    
+ Rafferty   |             31 |     35 | Marketing   
+ Jones      |             33 |     31 | Sales       
+ Jones      |             33 |     33 | Engineering 
+ Jones      |             33 |     34 | Clerical    
+ Jones      |             33 |     35 | Marketing   
+ Heisenberg |             33 |     31 | Sales       
+ Heisenberg |             33 |     33 | Engineering 
+ Heisenberg |             33 |     34 | Clerical    
+ Heisenberg |             33 |     35 | Marketing   
+ Robinson   |             34 |     31 | Sales       
+ Robinson   |             34 |     33 | Engineering 
+ Robinson   |             34 |     34 | Clerical    
+ Robinson   |             34 |     35 | Marketing   
+ Smith      |             34 |     31 | Sales       
+ Smith      |             34 |     33 | Engineering 
+ Smith      |             34 |     34 | Clerical    
+ Smith      |             34 |     35 | Marketing   
+ Williams   |                |     31 | Sales       
+ Williams   |                |     33 | Engineering 
+ Williams   |                |     34 | Clerical    
+ Williams   |                |     35 | Marketing   
+(24 rows)
+
+> select * from employees, departments;
+  emp_name  | emp_department | dep_id |  dep_name   
+------------+----------------+--------+-------------
+ Rafferty   |             31 |     31 | Sales       
+ Rafferty   |             31 |     33 | Engineering 
+ Rafferty   |             31 |     34 | Clerical    
+ Rafferty   |             31 |     35 | Marketing   
+ Jones      |             33 |     31 | Sales       
+ Jones      |             33 |     33 | Engineering 
+ Jones      |             33 |     34 | Clerical    
+ Jones      |             33 |     35 | Marketing   
+ Heisenberg |             33 |     31 | Sales       
+ Heisenberg |             33 |     33 | Engineering 
+ Heisenberg |             33 |     34 | Clerical    
+ Heisenberg |             33 |     35 | Marketing   
+ Robinson   |             34 |     31 | Sales       
+ Robinson   |             34 |     33 | Engineering 
+ Robinson   |             34 |     34 | Clerical    
+ Robinson   |             34 |     35 | Marketing   
+ Smith      |             34 |     31 | Sales       
+ Smith      |             34 |     33 | Engineering 
+ Smith      |             34 |     34 | Clerical    
+ Smith      |             34 |     35 | Marketing   
+ Williams   |                |     31 | Sales       
+ Williams   |                |     33 | Engineering 
+ Williams   |                |     34 | Clerical    
+ Williams   |                |     35 | Marketing   
+(24 rows)
+
+> select * from employees inner join departments on 1=1;
+  emp_name  | emp_department | dep_id |  dep_name   
+------------+----------------+--------+-------------
+ Rafferty   |             31 |     31 | Sales       
+ Rafferty   |             31 |     33 | Engineering 
+ Rafferty   |             31 |     34 | Clerical    
+ Rafferty   |             31 |     35 | Marketing   
+ Jones      |             33 |     31 | Sales       
+ Jones      |             33 |     33 | Engineering 
+ Jones      |             33 |     34 | Clerical    
+ Jones      |             33 |     35 | Marketing   
+ Heisenberg |             33 |     31 | Sales       
+ Heisenberg |             33 |     33 | Engineering 
+ Heisenberg |             33 |     34 | Clerical    
+ Heisenberg |             33 |     35 | Marketing   
+ Robinson   |             34 |     31 | Sales       
+ Robinson   |             34 |     33 | Engineering 
+ Robinson   |             34 |     34 | Clerical    
+ Robinson   |             34 |     35 | Marketing   
+ Smith      |             34 |     31 | Sales       
+ Smith      |             34 |     33 | Engineering 
+ Smith      |             34 |     34 | Clerical    
+ Smith      |             34 |     35 | Marketing   
+ Williams   |                |     31 | Sales       
+ Williams   |                |     33 | Engineering 
+ Williams   |                |     34 | Clerical    
+ Williams   |                |     35 | Marketing   
+(24 rows)
+
+
+> select emp_name, dep_id, dep_name
+> from employees
+> join departments on emp_department = dep_id;
+  emp_name  | dep_id |  dep_name   
+------------+--------+-------------
+ Rafferty   |     31 | Sales       
+ Jones      |     33 | Engineering 
+ Heisenberg |     33 | Engineering 
+ Robinson   |     34 | Clerical    
+ Smith      |     34 | Clerical    
+(5 rows)
+
+> select emp_name, dep_id, dep_name
+> from employees, departments
+> where emp_department = dep_id;
+  emp_name  | dep_id |  dep_name   
+------------+--------+-------------
+ Rafferty   |     31 | Sales       
+ Jones      |     33 | Engineering 
+ Heisenberg |     33 | Engineering 
+ Robinson   |     34 | Clerical    
+ Smith      |     34 | Clerical    
+(5 rows)
+
+
+> select emp_name, dep_id, dep_name
+> from employees
+> left join departments on emp_department = dep_id;
+  emp_name  | dep_id |  dep_name   
+------------+--------+-------------
+ Rafferty   |     31 | Sales       
+ Jones      |     33 | Engineering 
+ Heisenberg |     33 | Engineering 
+ Robinson   |     34 | Clerical    
+ Smith      |     34 | Clerical    
+ Williams   |        |             
+(6 rows)
+
+> select emp_name, dep_id, dep_name
+> from employees
+> right join departments on emp_department = dep_id;
+  emp_name  | dep_id |  dep_name   
+------------+--------+-------------
+ Rafferty   |     31 | Sales       
+ Jones      |     33 | Engineering 
+ Heisenberg |     33 | Engineering 
+ Robinson   |     34 | Clerical    
+ Smith      |     34 | Clerical    
+            |     35 | Marketing   
+(6 rows)
+
+> select emp_name, dep_id, dep_name
+> from employees
+> full join departments on emp_department = dep_id;
+  emp_name  | dep_id |  dep_name   
+------------+--------+-------------
+ Rafferty   |     31 | Sales       
+ Jones      |     33 | Engineering 
+ Heisenberg |     33 | Engineering 
+ Robinson   |     34 | Clerical    
+ Smith      |     34 | Clerical    
+ Williams   |        |             
+            |     35 | Marketing   
+(7 rows)
+

@@ -146,8 +146,12 @@ pub const DataNode = struct {
             rhs: *DataNode,
             /// Join condition
             cond: ?*ScalarNode,
+            /// Tuple descriptor for condition
+            cond_descr: *const common.TupleDescriptor,
+            /// What kind of tuple should we run condition on?
+            cond_format: TupleFormat,
             /// What kind of tuple should we output?
-            output: OutputFormat,
+            output_format: TupleFormat,
 
             pub const Op = enum {
                 cross, // No condition to check
@@ -157,7 +161,7 @@ pub const DataNode = struct {
                 anti_semi, // All left tuples that have no matches
             };
 
-            pub const OutputFormat = enum {
+            pub const TupleFormat = enum {
                 left_right,
                 right_left,
                 left_only,

@@ -79,6 +79,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
             // Some join types require us to return a tuple here
             switch (plan.action.nested_loop.op) {
                 .anti_semi => {
+                    std.debug.assert(plan.action.nested_loop.output_format == .left_only);
                     // Return left tuple if we didn't find a match for it
                     if (!state.found_match)
                         return left_tuple
@@ -91,41 +92,63 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
                         continue;
                     // Fill the right tuple with nulls
                     var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
-                    for (0..state.left_tuple.?.len()) |i| {
-                        b.pushValue(state.left_tuple.?.getValue(i));
+                    switch (plan.action.nested_loop.output_format) {
+                        .left_right => {
+                            for (0..left_tuple.len()) |i| {
+                                b.pushValue(left_tuple.getValue(i));
+                            }
+                            for (0..plan.action.nested_loop.rhs.descr.attrs.len) |_| {
+                                b.pushValue(.null);
+                            }
+                            if (plan.descr.has_extended)
+                                b.addExtended(left_tuple.extended().*);
+                        },
+                        .right_left => {
+                            for (0..plan.action.nested_loop.rhs.descr.attrs.len) |_| {
+                                b.pushValue(.null);
+                            }
+                            for (0..left_tuple.len()) |i| {
+                                b.pushValue(left_tuple.getValue(i));
+                            }
+                            if (plan.descr.has_extended)
+                                b.addExtended(left_tuple.extended().*);
+                        },
+                        .left_only => unreachable,
                     }
-                    for (0..plan.action.nested_loop.rhs.descr.attrs.len) |_| {
-                        b.pushValue(.null);
-                    }
-                    if (plan.descr.has_extended)
-                        b.addExtended(state.left_tuple.?.extended().*);
-                    state.left_tuple = null;
                     return b.finalize();
                 },
                 .cross, .inner, .semi => continue,
             }
         }
 
-        const result_tuple = switch (plan.action.nested_loop.op) {
-            .cross, .inner, .left => tuple: {
-                // We are ready to build combined tuple
-                var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
-                for (0..state.left_tuple.?.len()) |i| {
-                    b.pushValue(state.left_tuple.?.getValue(i));
-                }
-                for (0..right_tuple.?.len()) |i| {
-                    b.pushValue(right_tuple.?.getValue(i));
-                }
-                if (plan.descr.has_extended)
-                    b.addExtended(state.left_tuple.?.extended().*);
-                break :tuple b.finalize();
-            },
-            .semi, .anti_semi => state.left_tuple.?,
+        const cond_tuple = tuple: {
+            // We are ready to build combined tuple
+            var b = common.MemTuple.Builder.init(cxt.alloc, plan.action.nested_loop.cond_descr);
+            switch (plan.action.nested_loop.cond_format) {
+                .left_right => {
+                    for (0..state.left_tuple.?.len()) |i| {
+                        b.pushValue(state.left_tuple.?.getValue(i));
+                    }
+                    for (0..right_tuple.?.len()) |i| {
+                        b.pushValue(right_tuple.?.getValue(i));
+                    }
+                },
+                .right_left => {
+                    for (0..right_tuple.?.len()) |i| {
+                        b.pushValue(right_tuple.?.getValue(i));
+                    }
+                    for (0..state.left_tuple.?.len()) |i| {
+                        b.pushValue(state.left_tuple.?.getValue(i));
+                    }
+                },
+                .left_only => unreachable,
+            }
+            break :tuple b.finalize();
         };
 
         // Check the condition
         const cond = if (plan.action.nested_loop.cond) |cond|
-            try scalar.eval(cond, result_tuple, cxt)
+            try scalar.eval(cond, cond_tuple, cxt)
         else
             common.Value{ .boolean = true };
         // Return the tuple if condition is true, skip if false
@@ -136,6 +159,34 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
         };
 
         if (cond_val) {
+            const result_tuple = switch (plan.action.nested_loop.output_format) {
+                .left_right => tuple: {
+                    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
+                    for (0..state.left_tuple.?.len()) |i| {
+                        b.pushValue(state.left_tuple.?.getValue(i));
+                    }
+                    for (0..right_tuple.?.len()) |i| {
+                        b.pushValue(right_tuple.?.getValue(i));
+                    }
+                    if (plan.descr.has_extended)
+                        b.addExtended(state.left_tuple.?.extended().*);
+                    break :tuple b.finalize();
+                },
+                .left_only => state.left_tuple.?,
+                .right_left => tuple: {
+                    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
+                    for (0..right_tuple.?.len()) |i| {
+                        b.pushValue(right_tuple.?.getValue(i));
+                    }
+                    for (0..state.left_tuple.?.len()) |i| {
+                        b.pushValue(state.left_tuple.?.getValue(i));
+                    }
+                    if (plan.descr.has_extended)
+                        b.addExtended(right_tuple.?.extended().*);
+                    break :tuple b.finalize();
+                },
+            };
+
             state.found_match = true;
             switch (plan.action.nested_loop.op) {
                 .inner, .left, .cross => return result_tuple,

@@ -63,7 +63,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
 /// Plan CREATE TABLE statement
 fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Statement {
     // Build the TupleDescriptor for the new table
-    const descr = p.make(common.TupleDescriptor.empty);
+    const descr = p.make(common.TupleDescriptor.empty_extended);
     descr.attrs.ensureUnusedCapacity(
         p.alloc,
         stmt.columns.len,
@@ -643,8 +643,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = null,
+                .cond_descr = new_descr,
+                .cond_format = .left_right,
                 .op = .cross,
-                .output = .left_right,
+                .output_format = .left_right,
             } },
         }),
         .inner => p.make(Plan.DataNode{
@@ -653,8 +655,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = cond,
+                .cond_descr = new_descr,
+                .cond_format = .left_right,
                 .op = .inner,
-                .output = .left_right,
+                .output_format = .left_right,
             } },
         }),
         .left => p.make(Plan.DataNode{
@@ -663,8 +667,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = cond,
+                .cond_descr = new_descr,
+                .cond_format = .left_right,
                 .op = .left,
-                .output = .left_right,
+                .output_format = .left_right,
             } },
         }),
         .right => p.make(Plan.DataNode{
@@ -673,8 +679,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                 .lhs = rhs,
                 .rhs = lhs,
                 .cond = cond,
+                .cond_descr = new_descr,
+                .cond_format = .right_left,
                 .op = .left,
-                .output = .right_left,
+                .output_format = .right_left,
             } },
         }),
         .full => out: {
@@ -685,8 +693,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                     .lhs = lhs,
                     .rhs = rhs,
                     .cond = cond,
+                    .cond_descr = new_descr,
+                    .cond_format = .left_right,
                     .op = .left,
-                    .output = .left_right,
+                    .output_format = .left_right,
                 } },
             };
             const anti_semi_join = p.make(Plan.DataNode{
@@ -695,8 +705,10 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
                     .lhs = rhs,
                     .rhs = lhs,
                     .cond = cond,
+                    .cond_descr = new_descr,
+                    .cond_format = .right_left,
                     .op = .anti_semi,
-                    .output = .left_only,
+                    .output_format = .left_only,
                 } },
             });
             inputs[1] = Plan.DataNode{
