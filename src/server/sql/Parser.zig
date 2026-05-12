@@ -370,12 +370,12 @@ fn parseCommaListErr(
 fn parseDataSourceList(p: *Parser) ast.DataSource {
     var lhs = p.parseDataSource();
     while (p.eat(.{ .symbol = .comma })) {
-        const new = ast.DataSource{ .join = .{
+        const new = ast.DataSource{ .u = .{ .join = .{
             .kind = .cross,
             .lhs = p.make(lhs),
             .rhs = p.make(p.parseDataSource()),
             .cond = null,
-        } };
+        } } };
         lhs = new;
     }
     return lhs;
@@ -415,12 +415,12 @@ fn parseDataSource(p: *Parser) ast.DataSource {
             break :cond p.make(p.parseExpression());
         } else null;
 
-        const new = ast.DataSource{ .join = .{
+        const new = ast.DataSource{ .u = .{ .join = .{
             .kind = kind,
             .lhs = p.make(lhs),
             .rhs = p.make(rhs),
             .cond = cond,
-        } };
+        } } };
         lhs = new;
     }
     return lhs;
@@ -442,10 +442,10 @@ fn parseAtomicDataSource(p: *Parser) ast.DataSource {
             else
                 null;
             return .{
-                .table = .{
+                .u = .{ .table = .{
                     .name = name,
-                    .alias = table_alias,
-                },
+                } },
+                .alias = table_alias,
             };
         },
         .symbol => |s| switch (s) {
@@ -461,11 +461,7 @@ fn parseAtomicDataSource(p: *Parser) ast.DataSource {
                 else
                     null;
                 if (table_alias) |ta| {
-                    switch (ds) {
-                        .table => ds.table.alias = ta,
-                        .join => ds.join.alias = ta,
-                        .err => {},
-                    }
+                    ds.alias = ta;
                 }
                 return ds;
             },
@@ -498,12 +494,14 @@ fn parseInsert(p: *Parser) ast.Statement {
     } else &.{};
     p.expectKeyword(.values) catch return .err;
     const values =
-        p.parseCommaListErr(ast.ValueList, parseValueList) catch return .err;
+        p.parseCommaListErr([]ast.Expression, parseValueList) catch return .err;
     p.expectSymbol(.semi) catch return .err;
     return .{ .insert_values = .{
         .name = name,
         .columns = columns,
-        .values = values,
+        .values = p.make(ast.DataSource{ .u = .{
+            .values = .{ .data = values },
+        } }),
     } };
 }
 
@@ -511,12 +509,12 @@ fn parseInsert(p: *Parser) ast.Statement {
 /// ```
 /// ValueList = "(" CommaList(Expression) ")"
 /// ```
-fn parseValueList(p: *Parser) !ast.ValueList {
+fn parseValueList(p: *Parser) ![]ast.Expression {
     try p.expectSymbol(.lparen);
     const exprs =
         p.parseCommaList(ast.Expression, parseExpression);
     try p.expectSymbol(.rparen);
-    return .{ .columns = exprs };
+    return exprs;
 }
 
 /// Parse a CREATE statement. Currently only CREATE TABLE supported.
@@ -810,10 +808,10 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
                 p.expectSymbol(.minus) catch unreachable;
                 const bp = prefixBindingPower(t.kind).?;
                 const expr = p.make(p.parseExpressionPratt(bp));
-                break :lhs ast.Expression{ .unary = .{
+                break :lhs ast.Expression{ .u = .{ .unary = .{
                     .op = .neg,
                     .expr = expr,
-                } };
+                } } };
             },
             else => {
                 p.addError(t, "Expected expression but got \"{s}\"", .{s.text()});
@@ -836,10 +834,10 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
                 p.expectKeyword(.null) catch return .err;
 
                 const op: ast.Expression.Unary.Op = if (negate) .not_null else .null;
-                const new = ast.Expression{ .unary = .{
+                const new = ast.Expression{ .u = .{ .unary = .{
                     .op = op,
                     .expr = p.make(lhs),
-                } };
+                } } };
                 lhs = new;
                 continue;
             } else unreachable;
@@ -854,11 +852,11 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
             const lhs_expr = p.make(lhs);
             const rhs_expr = p.make(p.parseExpressionPratt(bp.r));
 
-            const new = ast.Expression{ .binary = .{
+            const new = ast.Expression{ .u = .{ .binary = .{
                 .op = infixOp(op_token.kind).?,
                 .left = lhs_expr,
                 .right = rhs_expr,
-            } };
+            } } };
             lhs = new;
             continue;
         }
@@ -882,15 +880,15 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         .keyword => |kw| switch (kw) {
             .true => {
                 p.pos += 1;
-                return .{ .boolean = true };
+                return .{ .u = .{ .boolean = true } };
             },
             .false => {
                 p.pos += 1;
-                return .{ .boolean = false };
+                return .{ .u = .{ .boolean = false } };
             },
             .null => {
                 p.pos += 1;
-                return .null;
+                return .{ .u = .null };
             },
             else => {
                 p.addError(
@@ -908,7 +906,7 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                     return .err;
                 };
             p.pos += 1;
-            return .{ .integer = x };
+            return .{ .u = .{ .integer = x } };
         },
         .str => {
             const raw = t.text(p.input);
@@ -936,7 +934,11 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                 }
             }
             p.pos += 1;
-            return .{ .string = .{ .raw = arr.toOwnedSlice(p.alloc) catch oom() } };
+            return .{ .u = .{
+                .string = .{
+                    .raw = arr.toOwnedSlice(p.alloc) catch oom(),
+                },
+            } };
         },
         .id => {
             const first = p.parseName() catch return .err;
@@ -945,15 +947,15 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
             else
                 null;
             if (second) |s|
-                return .{ .variable = .{
+                return .{ .u = .{ .variable = .{
                     .table = first,
                     .name = s,
-                } }
+                } } }
             else
-                return .{ .variable = .{
+                return .{ .u = .{ .variable = .{
                     .table = null,
                     .name = first,
-                } };
+                } } };
         },
         else => {
             p.addError(
@@ -974,7 +976,7 @@ fn parseName(p: *Parser) !ast.Name {
     const t = p.peek();
     if (t.kind == .id) {
         p.advance();
-        return t.text(p.input);
+        return .{ .text = t.text(p.input) };
     } else {
         p.addError(
             t,

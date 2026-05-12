@@ -71,16 +71,16 @@ fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Sta
     ) catch oom();
     for (stmt.columns) |c| {
         descr.attrs.appendAssumeCapacity(.{
-            .name = c.name,
+            .name = c.name.text,
             .t = c.col_type,
-            .table_name = stmt.name,
+            .table_name = stmt.name.text,
         });
     }
 
     // Convert name to lowercase
     const lower_name = std.ascii.allocLowerString(
         p.alloc,
-        stmt.name,
+        stmt.name.text,
     ) catch oom();
 
     // Make the statement node.
@@ -122,7 +122,7 @@ fn findTable(p: *Planner, name: []const u8) Error!catalog.Entry(.zdb_rels) {
 
 /// Plan DROP TABLE statement
 fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Statement {
-    const table = try p.findTable(stmt.name);
+    const table = try p.findTable(stmt.name.text);
     return p.make(Plan.Statement{ .drop_table = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
@@ -131,7 +131,7 @@ fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Stateme
 
 /// Plan TRUNCATE statement
 fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement {
-    const table = try p.findTable(stmt.name);
+    const table = try p.findTable(stmt.name.text);
     return p.make(Plan.Statement{ .truncate = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
@@ -144,9 +144,9 @@ pub fn findAttribute(p: *Planner, td: *const common.TupleDescriptor, v: ast.Expr
     var result: ?usize = null;
     for (td.attrs.items, 0..) |att, i| {
         if (v.table) |tn|
-            if (!std.ascii.eqlIgnoreCase(att.table_name, tn))
+            if (!std.ascii.eqlIgnoreCase(att.table_name, tn.text))
                 continue;
-        if (std.ascii.eqlIgnoreCase(att.name, v.name)) {
+        if (std.ascii.eqlIgnoreCase(att.name, v.name.text)) {
             if (result != null) {
                 p.addError("Name \"{s}\" is ambiguous, please specify a table", .{att.name});
                 return Error.AmbiguousName;
@@ -160,7 +160,7 @@ pub fn findAttribute(p: *Planner, td: *const common.TupleDescriptor, v: ast.Expr
 /// Plan INSERT VALUES statement
 fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.Statement {
     // Find the target table
-    const table = try p.findTable(stmt.name);
+    const table = try p.findTable(stmt.name.text);
     const full_descr = p.cat.descr.getPtr(table.rel_id).?;
     // List of expressions for projection
     var scalarNodes =
@@ -186,7 +186,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                 .{ .name = col_name },
             );
             if (col_id == null) {
-                p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ col_name, stmt.name });
+                p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ col_name.text, stmt.name.text });
                 return Error.UnknownName;
             }
             // Build the descriptor for the input data we get from VALUES part of the query
@@ -214,7 +214,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
             } else {
                 p.addError(
                     "Missing value for column \"{s}\" in table \"{s}\"",
-                    .{ att.name, stmt.name },
+                    .{ att.name, stmt.name.text },
                 );
                 return Error.NotSupported;
             }
@@ -225,7 +225,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     }
 
     // Plan the VALUES data source
-    var root = try p.planValues(stmt.values, input_descr);
+    var root = try p.planValues(stmt.values.u.values.data, input_descr);
     // We always need a projection node to add extended fields
     {
         // Add the projection node on top of VALUES, if needed
@@ -249,7 +249,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
 
 /// Is the expression a constant?
 fn isConstExpression(expr: ast.Expression) bool {
-    switch (expr) {
+    switch (expr.u) {
         .variable => return false,
         .integer => return true,
         .string => return true,
@@ -269,9 +269,9 @@ fn evalConstExpression(
 ) Error!common.TypedValue {
     const t = try p.inferExprType(expr, cxt);
 
-    switch (expr) {
+    switch (expr.u) {
         .variable => |v| {
-            p.addError("Cannot use variable \"{s}\" as a constant", .{v.name});
+            p.addError("Cannot use variable \"{s}\" as a constant", .{v.name.text});
             return Error.NotAConstant;
         },
         .integer => |i| return common.TypedValue{
@@ -386,8 +386,8 @@ fn evalConstExpression(
 
 /// Suggest a name for the column if no explicit alias is given
 fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
-    switch (expr) {
-        .variable => |v| return v.name,
+    switch (expr.u) {
+        .variable => |v| return v.name.text,
         .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
         .boolean => |b| return if (b) "t" else "f",
         .null => return "null",
@@ -416,7 +416,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
                 const node = try p.planExpression(n.expr.*, input_node.descr);
                 scalarNodes.appendAssumeCapacity(node);
                 if (n.alias) |a|
-                    aliases.appendAssumeCapacity(a)
+                    aliases.appendAssumeCapacity(a.text)
                 else
                     aliases.appendAssumeCapacity(try p.suggestExpressionName(n.expr.*));
             },
@@ -432,10 +432,10 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 
                 for (input_node.descr.attrs.items) |att| {
                     const node = try p.planExpression(
-                        .{ .variable = .{
-                            .name = att.name,
-                            .table = att.table_name,
-                        } },
+                        .{ .u = .{ .variable = .{
+                            .name = .{ .text = att.name },
+                            .table = .{ .text = att.table_name },
+                        } } },
                         input_node.descr,
                     );
                     scalarNodes.appendAssumeCapacity(node);
@@ -527,9 +527,9 @@ fn planUnion(p: *Planner, stmt: ast.Statement.Union) Error!*Plan.Statement {
 /// Plan DELETE statement
 fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
     // Plan the data source for input
-    const table = try p.findTable(stmt.name);
+    const table = try p.findTable(stmt.name.text);
     const input_node = try p.planDataSource(&.{
-        .table = .{ .name = stmt.name },
+        .u = .{ .table = .{ .name = stmt.name } },
     }, true);
 
     // This is the input data
@@ -562,9 +562,9 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
 /// Plan UPDATE statement
 fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
     // Plan the data source for input
-    const table = try p.findTable(stmt.name);
+    const table = try p.findTable(stmt.name.text);
     const input_node = try p.planDataSource(&.{
-        .table = .{ .name = stmt.name },
+        .u = .{ .table = .{ .name = stmt.name } },
     }, true);
 
     // This is the input data
@@ -598,7 +598,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
             .{ .name = clause.column },
         );
         if (col_id == null) {
-            p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column, stmt.name });
+            p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column.text, stmt.name.text });
             return Error.UnknownName;
         }
 
@@ -621,24 +621,25 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
 /// Plan a data source node.
 /// This is currently very simple because almost nothing is supported.
 fn planDataSource(p: *Planner, source: *const ast.DataSource, need_extended: bool) Error!*Plan.DataNode {
-    switch (source.*) {
-        .table => |t| return try p.planFullScan(t),
-        .join => |j| return try p.planNestedLoop(j, need_extended),
+    switch (source.u) {
+        .table => |t| return try p.planFullScan(t, source.alias),
+        .join => |j| return try p.planNestedLoop(j, source.alias, need_extended),
+        .values => unreachable,
         .err => unreachable,
     }
 }
 
 /// Plan a full scan node for a table.
-fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
+fn planFullScan(p: *Planner, table: ast.DataSource.Table, alias: ?ast.Name) Error!*Plan.DataNode {
     // Find the table in question
-    const table_id = try p.findTable(table.name);
+    const table_id = try p.findTable(table.name.text);
     // Find its descriptor
     const descr = p.make(p.cat.descr.get(table_id.rel_id).?);
     // Change table alias if we have one
-    if (table.alias) |ta| {
+    if (alias) |ta| {
         descr.* = descr.clone(p.alloc);
         for (descr.attrs.items) |*att|
-            att.table_name = ta;
+            att.table_name = ta.text;
     }
     // Build the data source node
     return p.make(Plan.DataNode{
@@ -650,7 +651,7 @@ fn planFullScan(p: *Planner, table: ast.DataSource.Table) Error!*Plan.DataNode {
 }
 
 /// Plan a nested loop join.
-fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) Error!*Plan.DataNode {
+fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need_extended: bool) Error!*Plan.DataNode {
     // Plan children data sources
     const lhs = try p.planDataSource(join.lhs, need_extended);
     const rhs = try p.planDataSource(join.rhs, false);
@@ -663,9 +664,9 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
     new_descr.attrs.appendSliceAssumeCapacity(rhs.descr.attrs.items);
     new_descr.has_extended = need_extended;
     // Change table alias if we have one
-    if (join.alias) |ta| {
+    if (alias) |ta| {
         for (new_descr.attrs.items) |*att|
-            att.table_name = ta;
+            att.table_name = ta.text;
     }
     // Plan the join condition
     const cond = if (join.cond) |c|
@@ -769,7 +770,7 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, need_extended: bool) E
 /// Plan a data source node for VALUES list
 fn planValues(
     p: *Planner,
-    values: []const ast.ValueList,
+    values: [][]ast.Expression,
     cxt: *const common.TupleDescriptor,
 ) Error!*Plan.DataNode {
     // The list of tuples in the VALUES
@@ -778,17 +779,17 @@ fn planValues(
     // Go through all the rows in the query
     for (values) |row| {
         // Check the row lengths
-        if (row.columns.len != cxt.len()) {
+        if (row.len != cxt.len()) {
             p.addError(
                 "Expected {} values but got {}",
-                .{ cxt.len(), row.columns.len },
+                .{ cxt.len(), row.len },
             );
             return Error.Other;
         }
 
         // Build the tuple
         var b = common.MemTuple.Builder.init(p.alloc, cxt);
-        for (row.columns, cxt.attrs.items) |expr, att| {
+        for (row, cxt.attrs.items) |expr, att| {
             const val = try p.evalConstExpression(expr, cxt);
             // Check the type of the value
             if (!val.t.convertsTo(att.t)) {
@@ -811,12 +812,12 @@ fn planValues(
 
 /// Try to infer a type of an expression, given the context of the currently available variables.
 fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDescriptor) Error!common.DBType {
-    switch (expr) {
+    switch (expr.u) {
         .variable => |v| { // Variable expression
             // Find the column
             const col_id = try p.findAttribute(cxt, v);
             if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v.name});
+                p.addError("Can't find variable \"{s}\"", .{v.name.text});
                 return Error.UnknownName;
             }
             // Construct the scalar node
@@ -896,12 +897,12 @@ fn planExpression(
     // Calculate the resulting type
     const t = try p.inferExprType(expr, cxt);
 
-    switch (expr) {
+    switch (expr.u) {
         .variable => |v| { // Variable expression
             // Find the column
             const col_id = try p.findAttribute(cxt, v);
             if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v.name});
+                p.addError("Can't find variable \"{s}\"", .{v.name.text});
                 return Error.UnknownName;
             }
             // Construct the scalar node

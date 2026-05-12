@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const common = @import("common");
+const catalog = @import("../catalog.zig");
 const DBType = common.DBType;
 const Text = common.Text;
 
@@ -43,7 +44,7 @@ pub const Statement = union(enum) {
     pub const InsertValues = struct {
         name: Name,
         columns: []Name,
-        values: []ValueList,
+        values: *DataSource,
     };
 
     pub const Update = struct {
@@ -80,23 +81,24 @@ pub const Statement = union(enum) {
     };
 };
 
-pub const ValueList = struct {
-    columns: []Expression,
-};
+pub const Expression = struct {
+    t: ?common.DBType = null,
+    u: union(enum) {
+        variable: Variable,
+        unary: Unary,
+        binary: Binary,
+        integer: i64,
+        string: Text,
+        boolean: bool,
+        null: void,
+        err: void,
+    },
 
-pub const Expression = union(enum) {
-    variable: Variable,
-    unary: Unary,
-    binary: Binary,
-    integer: i64,
-    string: Text,
-    boolean: bool,
-    null: void,
-    err: void,
+    pub const err = Expression{ .u = .err };
 
     pub const Variable = struct {
-        name: []const u8,
-        table: ?[]const u8 = null,
+        name: Name,
+        table: ?Name = null,
     };
 
     pub const Binary = struct {
@@ -133,14 +135,20 @@ pub const Expression = union(enum) {
     };
 };
 
-pub const DataSource = union(enum) {
-    table: Table,
-    join: Join,
-    err: void,
+pub const DataSource = struct {
+    t: ?*const common.TupleDescriptor = null,
+    alias: ?Name = null,
+    u: union(enum) {
+        table: Table,
+        join: Join,
+        values: Values,
+        err: void,
+    },
+
+    pub const err = DataSource{ .u = .err };
 
     pub const Table = struct {
         name: Name,
-        alias: ?Name = null,
     };
 
     pub const Join = struct {
@@ -148,7 +156,6 @@ pub const DataSource = union(enum) {
         lhs: *DataSource,
         rhs: *DataSource,
         cond: ?*Expression,
-        alias: ?Name = null,
 
         pub const Kind = enum {
             cross,
@@ -158,6 +165,13 @@ pub const DataSource = union(enum) {
             full,
         };
     };
+
+    pub const Values = struct {
+        data: [][]Expression,
+    };
 };
 
-pub const Name = []const u8;
+pub const Name = struct {
+    text: []const u8,
+    id: ?common.ids.ObjectId = null,
+};
