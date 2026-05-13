@@ -16,18 +16,16 @@ pub const DBType = enum(u32) {
     int2,
     int4,
     int8,
-    const_int,
     boolean,
     long_text,
     text,
     uuid,
-    any,
+    nulltype,
 
     /// Can this type be silently converted to other type?
     pub fn convertsTo(self: DBType, other: DBType) bool {
-        if (self == .any) return true;
+        if (self == .nulltype) return true;
         if (std.meta.eql(self, other)) return true;
-        if (self == .const_int and other.isNumber()) return true;
         if (self == .oid and other == .uint4) return true;
         if (self == .text and other == .long_text) return true;
         if (self == .long_text and other == .text) return true;
@@ -44,21 +42,21 @@ pub const DBType = enum(u32) {
             .uint8, .int8, .serial => 8,
             .boolean => 1,
             .uuid => 16,
+            .nulltype => 0,
             .text, .long_text => null,
-            .any, .const_int => unreachable,
         };
     }
 
     pub fn isSigned(self: DBType) bool {
         return switch (self) {
-            .int1, .int2, .int4, .int8, .const_int => true,
+            .int1, .int2, .int4, .int8 => true,
             else => false,
         };
     }
 
     pub fn isNumber(self: DBType) bool {
         return switch (self) {
-            .int1, .int2, .int4, .int8, .uint1, .uint2, .uint4, .uint8, .const_int => true,
+            .int1, .int2, .int4, .int8, .uint1, .uint2, .uint4, .uint8 => true,
             else => false,
         };
     }
@@ -67,10 +65,6 @@ pub const DBType = enum(u32) {
     /// Unsigned types are considered bigger than signed.
     pub fn maxIntType(self: DBType, other: DBType) DBType {
         if (std.meta.eql(self, other))
-            return self
-        else if (self == .const_int)
-            return other
-        else if (other == .const_int)
             return self
         else if (self.width().? > other.width().?)
             return self
@@ -97,7 +91,7 @@ pub const DBType = enum(u32) {
             .boolean => 1,
             .text, .long_text => 8,
             .uuid => 16,
-            .any, .const_int => unreachable,
+            .nulltype => 0,
         };
     }
 
@@ -116,7 +110,7 @@ pub const DBType = enum(u32) {
             .boolean => T == bool,
             .text, .long_text => T == Text,
             .uuid => T == uuid.Uuid,
-            .any, .const_int => unreachable,
+            .nulltype => unreachable,
         };
     }
 };

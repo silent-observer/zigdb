@@ -20,11 +20,6 @@ errors: std.ArrayList([]const u8),
 
 pub const Error = error{
     NotSupported,
-    UnknownName,
-    AmbiguousName,
-    NotAConstant,
-    TypeError,
-    Other,
 };
 
 /// Initialize the planner
@@ -44,7 +39,7 @@ pub fn make(p: *Planner, val: anytype) *@TypeOf(val) {
 }
 
 /// Plan a statement
-pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
+pub fn plan(p: *Planner, stmt: ast.Statement) *Plan.Statement {
     switch (stmt) {
         .create_table => return p.planCreateTable(stmt.create_table),
         .drop_table => return p.planDropTable(stmt.drop_table),
@@ -62,7 +57,7 @@ pub fn plan(p: *Planner, stmt: ast.Statement) Error!*Plan.Statement {
 }
 
 /// Plan CREATE TABLE statement
-fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) Error!*Plan.Statement {
+fn planCreateTable(p: *Planner, stmt: ast.Statement.CreateTable) *Plan.Statement {
     // Build the TupleDescriptor for the new table
     const descr = p.make(common.TupleDescriptor.empty_extended);
     descr.attrs.ensureUnusedCapacity(
@@ -101,28 +96,18 @@ fn addError(p: *Planner, comptime fmt: []const u8, args: anytype) void {
 }
 
 /// Finds a table by its name
-fn findTable(p: *Planner, name: []const u8) Error!catalog.Entry(.zdb_rels) {
+fn findTable(p: *Planner, name: ast.Name) catalog.Entry(.zdb_rels) {
     // Scan through the catalog
-    var scanner = p.cat.catalog.zdb_rels.scanTextIgnoreCase(
-        .rel_name,
-        name,
-        &.{},
-        &.{},
+    var scanner = p.cat.catalog.zdb_rels.scan(
+        &.{.rel_id},
+        &.{name.id.?},
     );
-    const table = scanner.next();
-    if (table) |t| {
-        // If found, return it
-        return t;
-    } else {
-        // If not found, emit error
-        p.addError("Unknown table \"{s}\"", .{name});
-        return Error.UnknownName;
-    }
+    return scanner.next().?;
 }
 
 /// Plan DROP TABLE statement
-fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Statement {
-    const table = try p.findTable(stmt.name.text);
+fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) *Plan.Statement {
+    const table = p.findTable(stmt.name);
     return p.make(Plan.Statement{ .drop_table = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
@@ -130,37 +115,18 @@ fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) Error!*Plan.Stateme
 }
 
 /// Plan TRUNCATE statement
-fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) Error!*Plan.Statement {
-    const table = try p.findTable(stmt.name.text);
+fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) *Plan.Statement {
+    const table = p.findTable(stmt.name);
     return p.make(Plan.Statement{ .truncate = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
     } });
 }
 
-/// Find the index of an attribute given its name.
-/// Returns null if there is no such attribute.
-pub fn findAttribute(p: *Planner, td: *const common.TupleDescriptor, v: ast.Expression.Variable) Error!?usize {
-    var result: ?usize = null;
-    for (td.attrs.items, 0..) |att, i| {
-        if (v.table) |tn|
-            if (!std.ascii.eqlIgnoreCase(att.table_name, tn.text))
-                continue;
-        if (std.ascii.eqlIgnoreCase(att.name, v.name.text)) {
-            if (result != null) {
-                p.addError("Name \"{s}\" is ambiguous, please specify a table", .{att.name});
-                return Error.AmbiguousName;
-            }
-            result = i;
-        }
-    }
-    return result;
-}
-
 /// Plan INSERT VALUES statement
-fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.Statement {
+fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Statement {
     // Find the target table
-    const table = try p.findTable(stmt.name.text);
+    const table = p.findTable(stmt.name);
     const full_descr = p.cat.descr.getPtr(table.rel_id).?;
     // List of expressions for projection
     var scalarNodes =
@@ -169,34 +135,20 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
         std.ArrayList(bool).initCapacity(p.alloc, full_descr.len()) catch oom();
 
     // This is the descriptor of what we get as input data
-    const input_descr = p.alloc.create(common.TupleDescriptor) catch oom();
     if (stmt.columns.len > 0) {
-        // If the user specified the list of columns, we might need to reorder them for storage.
-        input_descr.* = .empty;
-        input_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
-
         _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.len());
         isScalarNodeFilled.appendNTimesAssumeCapacity(false, full_descr.len());
 
         // Go through the columns in the statement
         for (stmt.columns, 0..) |col_name, i| {
             // col_id is the index in the physical table, i is the index in the query
-            const col_id = try p.findAttribute(
-                full_descr,
-                .{ .name = col_name },
-            );
-            if (col_id == null) {
-                p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ col_name.text, stmt.name.text });
-                return Error.UnknownName;
-            }
-            // Build the descriptor for the input data we get from VALUES part of the query
-            input_descr.attrs.appendAssumeCapacity(full_descr.attrs.items[col_id.?]);
+            const col_id = col_name.id.?;
             // Build an expression for each physical column
-            scalarNodes.items[col_id.?] = .{
+            scalarNodes.items[col_id] = .{
                 .action = .{ .column = @intCast(i) },
-                .dbtype = full_descr.attrs.items[col_id.?].t,
+                .dbtype = full_descr.attrs.items[col_id].t,
             };
-            isScalarNodeFilled.items[col_id.?] = true;
+            isScalarNodeFilled.items[col_id] = true;
         }
 
         // Fill in missing columns with default values
@@ -211,21 +163,12 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
                     .dbtype = att.t,
                     .action = .{ .next_serial = table.rel_id },
                 };
-            } else {
-                p.addError(
-                    "Missing value for column \"{s}\" in table \"{s}\"",
-                    .{ att.name, stmt.name.text },
-                );
-                return Error.NotSupported;
             }
         }
-    } else {
-        input_descr.* = full_descr.clone(p.alloc);
-        input_descr.has_extended = false;
     }
 
     // Plan the VALUES data source
-    var root = try p.planValues(stmt.values.u.values.data, input_descr);
+    var root = p.planValues(stmt.values);
     // We always need a projection node to add extended fields
     {
         // Add the projection node on top of VALUES, if needed
@@ -247,161 +190,27 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) Error!*Plan.S
     } });
 }
 
-/// Is the expression a constant?
-fn isConstExpression(expr: ast.Expression) bool {
-    switch (expr.u) {
-        .variable => return false,
-        .integer => return true,
-        .string => return true,
-        .boolean => return true,
-        .null => return true,
-        .unary => |u| return isConstExpression(u.expr.*),
-        .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
-        .err => unreachable,
-    }
-}
-
-/// Evaluate the constant expression
-fn evalConstExpression(
-    p: *Planner,
-    expr: ast.Expression,
-    cxt: *const common.TupleDescriptor,
-) Error!common.TypedValue {
-    const t = try p.inferExprType(expr, cxt);
-
-    switch (expr.u) {
-        .variable => |v| {
-            p.addError("Cannot use variable \"{s}\" as a constant", .{v.name.text});
-            return Error.NotAConstant;
-        },
-        .integer => |i| return common.TypedValue{
-            .v = .{ .int = i },
-            .t = t,
-        },
-        .string => |str| return common.TypedValue{
-            .v = .{ .text = str },
-            .t = t,
-        },
-        .boolean => |b| return common.TypedValue{
-            .v = .{ .boolean = b },
-            .t = t,
-        },
-        .null => return common.TypedValue{
-            .v = .null,
-            .t = .any,
-        },
-        .unary => |u| {
-            const x = try p.evalConstExpression(u.expr.*, cxt);
-            switch (u.op) {
-                .null => return common.TypedValue{
-                    .v = .{ .boolean = x.v == .null },
-                    .t = t,
-                },
-                .not_null => return common.TypedValue{
-                    .v = .{ .boolean = x.v != .null },
-                    .t = t,
-                },
-                .neg => { // -x
-                    if (x.v == .null)
-                        return x;
-                    return common.TypedValue{
-                        .v = .{ .int = -x.v.int },
-                        .t = t,
-                    };
-                },
-                .not => { // not x
-                    if (x.v == .null)
-                        return x;
-                    return common.TypedValue{
-                        .v = .{ .boolean = !x.v.boolean },
-                        .t = t,
-                    };
-                },
-            }
-        },
-        .binary => |b| {
-            const lhs = try p.evalConstExpression(b.left.*, cxt);
-            const rhs = try p.evalConstExpression(b.right.*, cxt);
-            if (lhs.v == .null or rhs.v == .null)
-                return common.TypedValue{
-                    .v = .null,
-                    .t = t,
-                };
-            switch (b.op) {
-                .add, .sub, .mul, .div => { // +, -, *, /
-                    const v = switch (b.op) {
-                        .add => lhs.v.int + rhs.v.int,
-                        .sub => lhs.v.int - rhs.v.int,
-                        .mul => lhs.v.int * rhs.v.int,
-                        .div => @divTrunc(lhs.v.int, rhs.v.int),
-                        else => unreachable,
-                    };
-                    return common.TypedValue{
-                        .v = .{ .int = v },
-                        .t = t,
-                    };
-                },
-                .@"and", .@"or" => { // and, or
-                    const v = switch (b.op) {
-                        .@"and" => lhs.v.boolean and rhs.v.boolean,
-                        .@"or" => lhs.v.boolean or rhs.v.boolean,
-                        else => unreachable,
-                    };
-                    return common.TypedValue{
-                        .v = .{ .boolean = v },
-                        .t = t,
-                    };
-                },
-                .eq, .ne => { // =, <>
-                    const v = switch (lhs.v) {
-                        .null => unreachable,
-                        .boolean => lhs.v.boolean == rhs.v.boolean,
-                        .int => lhs.v.int == rhs.v.int,
-                        .uuid => lhs.v.uuid == rhs.v.uuid,
-                        .text => std.mem.eql(u8, lhs.v.text.text(), rhs.v.text.text()),
-                    };
-                    return common.TypedValue{
-                        .v = .{ .boolean = if (b.op == .eq) v else !v },
-                        .t = t,
-                    };
-                },
-                .lt, .gt, .le, .ge => { // <, >, <=, >=
-                    const v = switch (b.op) {
-                        .lt => lhs.v.int < rhs.v.int,
-                        .gt => lhs.v.int > rhs.v.int,
-                        .le => lhs.v.int <= rhs.v.int,
-                        .ge => lhs.v.int >= rhs.v.int,
-                        else => unreachable,
-                    };
-                    return common.TypedValue{
-                        .v = .{ .boolean = v },
-                        .t = t,
-                    };
-                },
-            }
-        },
-        .err => unreachable,
-    }
-}
-
 /// Suggest a name for the column if no explicit alias is given
-fn suggestExpressionName(p: *Planner, expr: ast.Expression) Error![]const u8 {
+fn suggestExpressionName(p: *Planner, expr: ast.Expression) []const u8 {
     switch (expr.u) {
         .variable => |v| return v.name.text,
-        .integer => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
-        .boolean => |b| return if (b) "t" else "f",
-        .null => return "null",
+        .value => |v| switch (v) {
+            .int => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
+            .boolean => |b| return if (b) "t" else "f",
+            .null => return "null",
+            .uuid => return "uuid",
+            .text => |s| return s.text(),
+        },
         .unary, .binary => return "expr",
-        .string => |s| return s.text(),
         .err => unreachable,
     }
 }
 
 /// Plan SELECT statement
-fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
+fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
     // Plan the data source for input
     const source = stmt.source;
-    const input_node = try p.planDataSource(source, false);
+    const input_node = p.planDataSource(source);
 
     // List of scalar nodes for expressions
     var scalarNodes =
@@ -413,12 +222,12 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
         // Build a scalar node for each expression
         switch (c) {
             .normal => |n| {
-                const node = try p.planExpression(n.expr.*, input_node.descr);
+                const node = p.planExpression(n.expr.*, input_node.descr);
                 scalarNodes.appendAssumeCapacity(node);
                 if (n.alias) |a|
                     aliases.appendAssumeCapacity(a.text)
                 else
-                    aliases.appendAssumeCapacity(try p.suggestExpressionName(n.expr.*));
+                    aliases.appendAssumeCapacity(p.suggestExpressionName(n.expr.*));
             },
             .star => {
                 scalarNodes.ensureTotalCapacity(
@@ -430,12 +239,18 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
                     scalarNodes.capacity + input_node.descr.len() - 1,
                 ) catch oom();
 
-                for (input_node.descr.attrs.items) |att| {
-                    const node = try p.planExpression(
-                        .{ .u = .{ .variable = .{
-                            .name = .{ .text = att.name },
-                            .table = .{ .text = att.table_name },
-                        } } },
+                for (input_node.descr.attrs.items, 0..) |att, i| {
+                    const node = p.planExpression(
+                        .{
+                            .u = .{ .variable = .{
+                                .name = .{
+                                    .text = att.name,
+                                    .id = @intCast(i),
+                                },
+                                .table = .{ .text = att.table_name },
+                            } },
+                            .t = att.t,
+                        },
                         input_node.descr,
                     );
                     scalarNodes.appendAssumeCapacity(node);
@@ -449,12 +264,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(try p.planExpression(condition.*, root.descr));
-
-        if (expr.dbtype != .boolean) {
-            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
-            return Error.TypeError;
-        }
+        const expr = p.make(p.planExpression(condition.*, root.descr));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -494,11 +304,11 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) Error!*Plan.Statement {
 }
 
 /// Plan UNION statement
-fn planUnion(p: *Planner, stmt: ast.Statement.Union) Error!*Plan.Statement {
+fn planUnion(p: *Planner, stmt: ast.Statement.Union) *Plan.Statement {
     var sources = std.ArrayList(Plan.DataNode)
         .initCapacity(p.alloc, stmt.stmts.len) catch oom();
     for (stmt.stmts) |child| {
-        const child_plan = try p.plan(child);
+        const child_plan = p.plan(child);
         std.debug.assert(child_plan.* == .select);
         sources.appendAssumeCapacity(child_plan.select.root.*);
 
@@ -506,13 +316,6 @@ fn planUnion(p: *Planner, stmt: ast.Statement.Union) Error!*Plan.Statement {
         p.alloc.destroy(child_plan);
     }
     std.debug.assert(sources.items.len > 0);
-
-    for (sources.items) |source| {
-        if (!source.descr.eql(sources.items[0].descr)) {
-            p.addError("Two sides of the UNION must match!", .{});
-            return Error.TypeError;
-        }
-    }
 
     return p.make(Plan.Statement{ .select = .{
         .root = p.make(Plan.DataNode{
@@ -525,23 +328,19 @@ fn planUnion(p: *Planner, stmt: ast.Statement.Union) Error!*Plan.Statement {
 }
 
 /// Plan DELETE statement
-fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
+fn planDelete(p: *Planner, stmt: ast.Statement.Delete) *Plan.Statement {
     // Plan the data source for input
-    const table = try p.findTable(stmt.name.text);
-    const input_node = try p.planDataSource(&.{
+    const full_descr = p.cat.descr.getPtr(stmt.name.id.?).?;
+    const input_node = p.planDataSource(&.{
         .u = .{ .table = .{ .name = stmt.name } },
-    }, true);
+        .t = full_descr,
+    });
 
     // This is the input data
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(try p.planExpression(condition.*, root.descr));
-
-        if (expr.dbtype != .boolean) {
-            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
-            return Error.TypeError;
-        }
+        const expr = p.make(p.planExpression(condition.*, root.descr));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -554,29 +353,26 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) Error!*Plan.Statement {
 
     // Make the statement node
     return p.make(Plan.Statement{ .delete = .{
-        .table = table.rel_id,
+        .table = stmt.name.id.?,
         .root = root,
     } });
 }
 
 /// Plan UPDATE statement
-fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
+fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
     // Plan the data source for input
-    const table = try p.findTable(stmt.name.text);
-    const input_node = try p.planDataSource(&.{
+    const table = p.findTable(stmt.name);
+    const full_descr = p.cat.descr.getPtr(stmt.name.id.?).?;
+    const input_node = p.planDataSource(&.{
         .u = .{ .table = .{ .name = stmt.name } },
-    }, true);
+        .t = full_descr,
+    });
 
     // This is the input data
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(try p.planExpression(condition.*, root.descr));
-
-        if (expr.dbtype != .boolean) {
-            p.addError("WHERE clause requires a bool condition, got {}", .{expr.dbtype});
-            return Error.TypeError;
-        }
+        const expr = p.make(p.planExpression(condition.*, root.descr));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -593,18 +389,9 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
         .initCapacity(p.alloc, stmt.clauses.len) catch oom();
 
     for (stmt.clauses) |clause| {
-        const col_id = try p.findAttribute(
-            root.descr,
-            .{ .name = clause.column },
-        );
-        if (col_id == null) {
-            p.addError("Can't find column \"{s}\" in table \"{s}\"", .{ clause.column.text, stmt.name.text });
-            return Error.UnknownName;
-        }
+        const val = p.planExpression(clause.expr.*, root.descr);
 
-        const val = try p.planExpression(clause.expr.*, root.descr);
-
-        cols.appendAssumeCapacity(@intCast(col_id.?));
+        cols.appendAssumeCapacity(@intCast(clause.column.id.?));
         vals.appendAssumeCapacity(val);
     }
 
@@ -620,104 +407,80 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) Error!*Plan.Statement {
 
 /// Plan a data source node.
 /// This is currently very simple because almost nothing is supported.
-fn planDataSource(p: *Planner, source: *const ast.DataSource, need_extended: bool) Error!*Plan.DataNode {
+fn planDataSource(p: *Planner, source: *const ast.DataSource) *Plan.DataNode {
     switch (source.u) {
-        .table => |t| return try p.planFullScan(t, source.alias),
-        .join => |j| return try p.planNestedLoop(j, source.alias, need_extended),
-        .values => unreachable,
+        .table => return p.planFullScan(source),
+        .join => return p.planNestedLoop(source),
+        .values => return p.planValues(source),
         .err => unreachable,
     }
 }
 
 /// Plan a full scan node for a table.
-fn planFullScan(p: *Planner, table: ast.DataSource.Table, alias: ?ast.Name) Error!*Plan.DataNode {
-    // Find the table in question
-    const table_id = try p.findTable(table.name.text);
-    // Find its descriptor
-    const descr = p.make(p.cat.descr.get(table_id.rel_id).?);
-    // Change table alias if we have one
-    if (alias) |ta| {
-        descr.* = descr.clone(p.alloc);
-        for (descr.attrs.items) |*att|
-            att.table_name = ta.text;
-    }
-    // Build the data source node
+fn planFullScan(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
     return p.make(Plan.DataNode{
-        .descr = descr,
+        .descr = ds.t.?,
         .action = .{ .full_scan = .{
-            .table = table_id.rel_id,
+            .table = ds.u.table.name.id.?,
         } },
     });
 }
 
 /// Plan a nested loop join.
-fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need_extended: bool) Error!*Plan.DataNode {
+fn planNestedLoop(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
     // Plan children data sources
-    const lhs = try p.planDataSource(join.lhs, need_extended);
-    const rhs = try p.planDataSource(join.rhs, false);
-    // Construct the total tuple descriptor
-    var new_descr = p.make(lhs.descr.clone(p.alloc));
-    new_descr.attrs.ensureUnusedCapacity(
-        p.alloc,
-        rhs.descr.len(),
-    ) catch oom();
-    new_descr.attrs.appendSliceAssumeCapacity(rhs.descr.attrs.items);
-    new_descr.has_extended = need_extended;
-    // Change table alias if we have one
-    if (alias) |ta| {
-        for (new_descr.attrs.items) |*att|
-            att.table_name = ta.text;
-    }
+    const lhs = p.planDataSource(ds.u.join.lhs);
+    const rhs = p.planDataSource(ds.u.join.rhs);
     // Plan the join condition
-    const cond = if (join.cond) |c|
-        p.make(try p.planExpression(c.*, new_descr))
+    const cond = if (ds.u.join.cond) |c|
+        p.make(p.planExpression(c.*, ds.t.?))
     else
         null;
 
-    return switch (join.kind) {
+    return switch (ds.u.join.kind) {
         .cross => p.make(Plan.DataNode{
-            .descr = new_descr,
+            .descr = ds.t.?,
             .action = .{ .nested_loop = .{
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = null,
-                .cond_descr = new_descr,
+                .cond_descr = ds.t.?,
                 .cond_format = .left_right,
                 .op = .cross,
                 .output_format = .left_right,
             } },
         }),
         .inner => p.make(Plan.DataNode{
-            .descr = new_descr,
+            .descr = ds.t.?,
             .action = .{ .nested_loop = .{
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = cond,
-                .cond_descr = new_descr,
+                .cond_descr = ds.t.?,
                 .cond_format = .left_right,
                 .op = .inner,
                 .output_format = .left_right,
             } },
         }),
         .left => p.make(Plan.DataNode{
-            .descr = new_descr,
+            .descr = ds.t.?,
             .action = .{ .nested_loop = .{
                 .lhs = lhs,
                 .rhs = rhs,
                 .cond = cond,
-                .cond_descr = new_descr,
+                .cond_descr = ds.t.?,
                 .cond_format = .left_right,
                 .op = .left,
                 .output_format = .left_right,
             } },
         }),
         .right => p.make(Plan.DataNode{
-            .descr = new_descr,
+            .descr = ds.t.?,
             .action = .{ .nested_loop = .{
                 .lhs = rhs,
                 .rhs = lhs,
                 .cond = cond,
-                .cond_descr = new_descr,
+                .cond_descr = ds.t.?,
                 .cond_format = .right_left,
                 .op = .left,
                 .output_format = .right_left,
@@ -726,12 +489,12 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need
         .full => out: {
             const inputs = p.alloc.alloc(Plan.DataNode, 2) catch oom();
             inputs[0] = Plan.DataNode{
-                .descr = new_descr,
+                .descr = ds.t.?,
                 .action = .{ .nested_loop = .{
                     .lhs = lhs,
                     .rhs = rhs,
                     .cond = cond,
-                    .cond_descr = new_descr,
+                    .cond_descr = ds.t.?,
                     .cond_format = .left_right,
                     .op = .left,
                     .output_format = .left_right,
@@ -743,14 +506,14 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need
                     .lhs = rhs,
                     .rhs = lhs,
                     .cond = cond,
-                    .cond_descr = new_descr,
+                    .cond_descr = ds.t.?,
                     .cond_format = .right_left,
                     .op = .anti_semi,
                     .output_format = .left_only,
                 } },
             });
             inputs[1] = Plan.DataNode{
-                .descr = new_descr,
+                .descr = ds.t.?,
                 .action = .{ .project = .{
                     .input = anti_semi_join,
                     .exprs = &.{},
@@ -758,7 +521,7 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need
                 } },
             };
             break :out p.make(Plan.DataNode{
-                .descr = new_descr,
+                .descr = ds.t.?,
                 .action = .{ .union_all = .{
                     .inputs = inputs,
                 } },
@@ -770,111 +533,28 @@ fn planNestedLoop(p: *Planner, join: ast.DataSource.Join, alias: ?ast.Name, need
 /// Plan a data source node for VALUES list
 fn planValues(
     p: *Planner,
-    values: [][]ast.Expression,
-    cxt: *const common.TupleDescriptor,
-) Error!*Plan.DataNode {
+    ds: *const ast.DataSource,
+) *Plan.DataNode {
     // The list of tuples in the VALUES
     var values_data =
-        std.ArrayList(common.MemTuple).initCapacity(p.alloc, values.len) catch oom();
+        std.ArrayList(common.MemTuple).initCapacity(p.alloc, ds.u.values.data.len) catch oom();
     // Go through all the rows in the query
-    for (values) |row| {
-        // Check the row lengths
-        if (row.len != cxt.len()) {
-            p.addError(
-                "Expected {} values but got {}",
-                .{ cxt.len(), row.len },
-            );
-            return Error.Other;
-        }
-
+    for (ds.u.values.data) |row| {
         // Build the tuple
-        var b = common.MemTuple.Builder.init(p.alloc, cxt);
-        for (row, cxt.attrs.items) |expr, att| {
-            const val = try p.evalConstExpression(expr, cxt);
-            // Check the type of the value
-            if (!val.t.convertsTo(att.t)) {
-                p.addError("Expected type {} but got {}", .{ att.t, val });
-                return Error.TypeError;
-            }
-            b.pushValue(val.v);
+        var b = common.MemTuple.Builder.init(p.alloc, ds.t.?);
+        for (row) |expr| {
+            b.pushValue(expr.u.value);
         }
         values_data.appendAssumeCapacity(b.finalize());
     }
 
     // Build the data source node
     return p.make(Plan.DataNode{
-        .descr = cxt,
+        .descr = ds.t.?,
         .action = .{ .values = .{
             .data = values_data.toOwnedSlice(p.alloc) catch oom(),
         } },
     });
-}
-
-/// Try to infer a type of an expression, given the context of the currently available variables.
-fn inferExprType(p: *Planner, expr: ast.Expression, cxt: *const common.TupleDescriptor) Error!common.DBType {
-    switch (expr.u) {
-        .variable => |v| { // Variable expression
-            // Find the column
-            const col_id = try p.findAttribute(cxt, v);
-            if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v.name.text});
-                return Error.UnknownName;
-            }
-            // Construct the scalar node
-            return cxt.attrs.items[col_id.?].t;
-        },
-        .integer => return .const_int,
-        .string => return .text,
-        .boolean => return .boolean,
-        .null => return .any,
-        .unary => |u| {
-            const child = try p.inferExprType(u.expr.*, cxt);
-            switch (u.op) {
-                .not, .neg => return child,
-                .null, .not_null => return .boolean,
-            }
-        },
-        .binary => |u| {
-            const lhs = try p.inferExprType(u.left.*, cxt);
-            const rhs = try p.inferExprType(u.right.*, cxt);
-            switch (u.op) {
-                .add, .sub, .mul, .div => { // Can do arithmetic only on numbers
-                    if (!lhs.isNumber()) {
-                        p.addError("Cannot use arithmetic operator on type {}", .{lhs});
-                        return Error.TypeError;
-                    } else if (!rhs.isNumber()) {
-                        p.addError("Cannot use arithmetic operator on type {}", .{rhs});
-                        return Error.TypeError;
-                    } else return lhs.maxIntType(rhs);
-                },
-                .@"and", .@"or" => { // Can do and/or only on booleans
-                    if (lhs != .boolean) {
-                        p.addError("Cannot use logic operator on type {}", .{lhs});
-                        return Error.TypeError;
-                    } else if (lhs != .boolean) {
-                        p.addError("Cannot use logic operator on type {}", .{rhs});
-                        return Error.TypeError;
-                    } else return .boolean;
-                },
-                .eq, .ne => { // Can check equality of numbers and values of the same type
-                    const both_numbers = lhs.isNumber() and rhs.isNumber();
-                    const same_type = std.meta.eql(lhs, rhs);
-                    if (!both_numbers and !same_type) {
-                        p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
-                        return Error.TypeError;
-                    } else return .boolean;
-                },
-                .lt, .gt, .le, .ge => { // Can only compare numbers
-                    const both_numbers = lhs.isNumber() and rhs.isNumber();
-                    if (!both_numbers) {
-                        p.addError("Cannot compare types {} and {}", .{ lhs, rhs });
-                        return Error.TypeError;
-                    } else return .boolean;
-                },
-            }
-        },
-        .err => unreachable,
-    }
 }
 
 /// Plan the scalar node for an expression (in the context of some tuple descriptor).
@@ -882,58 +562,45 @@ fn planExpression(
     p: *Planner,
     expr: ast.Expression,
     cxt: *const common.TupleDescriptor,
-) Error!Plan.ScalarNode {
+) Plan.ScalarNode {
     // Fast path for constant expressions
-    if (isConstExpression(expr)) {
-        // Evaluate the constant
-        const v = try p.evalConstExpression(expr, cxt);
-        // Construct the expression
+    if (expr.u == .value) {
         return Plan.ScalarNode{
-            .action = .{ .value = v.v },
-            .dbtype = v.t,
+            .action = .{ .value = expr.u.value },
+            .dbtype = expr.t.?,
         };
     }
 
-    // Calculate the resulting type
-    const t = try p.inferExprType(expr, cxt);
-
     switch (expr.u) {
         .variable => |v| { // Variable expression
-            // Find the column
-            const col_id = try p.findAttribute(cxt, v);
-            if (col_id == null) {
-                p.addError("Can't find variable \"{s}\"", .{v.name.text});
-                return Error.UnknownName;
-            }
-            // Construct the scalar node
             return Plan.ScalarNode{
-                .action = .{ .column = @intCast(col_id.?) },
-                .dbtype = t,
+                .action = .{ .column = @intCast(v.name.id.?) },
+                .dbtype = expr.t.?,
             };
         },
         .unary => |u| {
-            const child = p.make(try p.planExpression(u.expr.*, cxt));
+            const child = p.make(p.planExpression(u.expr.*, cxt));
             return Plan.ScalarNode{
                 .action = .{ .unary = .{
                     .op = u.op,
                     .child = child,
                 } },
-                .dbtype = t,
+                .dbtype = expr.t.?,
             };
         },
         .binary => |b| {
-            const left = p.make(try p.planExpression(b.left.*, cxt));
-            const right = p.make(try p.planExpression(b.right.*, cxt));
+            const left = p.make(p.planExpression(b.left.*, cxt));
+            const right = p.make(p.planExpression(b.right.*, cxt));
             return Plan.ScalarNode{
                 .action = .{ .binary = .{
                     .op = b.op,
                     .left = left,
                     .right = right,
                 } },
-                .dbtype = t,
+                .dbtype = expr.t.?,
             };
         },
-        .integer, .string, .boolean, .null => unreachable, // This is supposed to be a constant
+        .value => unreachable, // This is supposed to be a constant
         .err => unreachable,
     }
 }

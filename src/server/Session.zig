@@ -19,6 +19,7 @@ const Parser = @import("sql/Parser.zig");
 const Context = @import("executor/Context.zig");
 const Plan = planner.Plan;
 const Planner = planner.Planner;
+const TypeChecker = planner.TypeChecker;
 
 const Session = @This();
 
@@ -92,7 +93,7 @@ pub fn executeStmt(query: []const u8) !bool {
     }
 
     // Parse the query
-    const stmt = parser.parse();
+    var stmt = parser.parse();
     if (parser.incomplete) {
         try s.sender.send(.incomplete);
         return true;
@@ -107,15 +108,21 @@ pub fn executeStmt(query: []const u8) !bool {
 
     Logger.printPayload(.log, "AST", .{}, stmt);
 
-    // Plan the parsed query
-    var pl = Planner.init(arena.allocator(), s.catalog_cache);
-    const plan = pl.plan(stmt) catch {
-        for (pl.errors.items) |e| {
+    // Type check the AST
+    var tc = TypeChecker.init(arena.allocator(), s.catalog_cache);
+    if (!tc.check(&stmt)) {
+        for (tc.errors.items) |e| {
             Logger.err("{s}", .{e});
         }
         try s.sender.send(.err);
         return false;
-    };
+    }
+
+    Logger.printPayload(.log, "Typed AST", .{}, stmt);
+
+    // Plan the parsed query
+    var pl = Planner.init(arena.allocator(), s.catalog_cache);
+    const plan = pl.plan(stmt);
 
     Logger.printPayload(.log, "Plan", .{}, plan);
 

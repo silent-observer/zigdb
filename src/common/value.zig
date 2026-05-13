@@ -93,7 +93,6 @@ pub const Value = union(enum) {
     pub fn checkType(v: Value, dbtype: t.DBType) bool {
         if (v == .null) return true;
         switch (dbtype) {
-            .any => return true,
             .oid,
             .int1,
             .int2,
@@ -104,11 +103,11 @@ pub const Value = union(enum) {
             .uint4,
             .uint8,
             .serial,
-            .const_int,
             => return v == .int,
             .text, .long_text => return v == .text,
             .boolean => return v == .boolean,
             .uuid => return v == .uuid,
+            .nulltype => return false, // Should have returned true earlier
         }
     }
 

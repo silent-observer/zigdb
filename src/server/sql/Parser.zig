@@ -880,15 +880,21 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         .keyword => |kw| switch (kw) {
             .true => {
                 p.pos += 1;
-                return .{ .u = .{ .boolean = true } };
+                return .{ .u = .{
+                    .value = .{ .boolean = true },
+                } };
             },
             .false => {
                 p.pos += 1;
-                return .{ .u = .{ .boolean = false } };
+                return .{ .u = .{
+                    .value = .{ .boolean = false },
+                } };
             },
             .null => {
                 p.pos += 1;
-                return .{ .u = .null };
+                return .{ .u = .{
+                    .value = .null,
+                } };
             },
             else => {
                 p.addError(
@@ -906,7 +912,9 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
                     return .err;
                 };
             p.pos += 1;
-            return .{ .u = .{ .integer = x } };
+            return .{ .u = .{
+                .value = .{ .int = x },
+            } };
         },
         .str => {
             const raw = t.text(p.input);
@@ -935,8 +943,8 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
             }
             p.pos += 1;
             return .{ .u = .{
-                .string = .{
-                    .raw = arr.toOwnedSlice(p.alloc) catch oom(),
+                .value = .{
+                    .text = .makeRaw(arr.toOwnedSlice(p.alloc) catch oom()),
                 },
             } };
         },

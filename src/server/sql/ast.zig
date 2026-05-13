@@ -87,10 +87,7 @@ pub const Expression = struct {
         variable: Variable,
         unary: Unary,
         binary: Binary,
-        integer: i64,
-        string: Text,
-        boolean: bool,
-        null: void,
+        value: common.Value,
         err: void,
     },
 

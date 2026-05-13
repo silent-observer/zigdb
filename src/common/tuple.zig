@@ -265,7 +265,7 @@ pub const MemTuple = struct {
             .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
             .uuid => return .{ .uuid = @intCast(std.mem.bytesToValue(uuid.Uuid, data)) },
             .text, .long_text => return .{ .text = Text.fromBytes(data) },
-            .any, .const_int => unreachable,
+            .nulltype => return .null,
         };
     }
 
@@ -448,7 +448,7 @@ pub const MemTuple = struct {
                     b.pushBytes(std.mem.asBytes(&x));
                 },
                 .uuid => b.pushBytes(std.mem.asBytes(&val.uuid)),
-                .any, .const_int => unreachable,
+                .nulltype => unreachable, // Should have put NULL there earlier
             }
         }
 
