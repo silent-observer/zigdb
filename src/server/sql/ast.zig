@@ -24,6 +24,7 @@ pub const Statement = union(enum) {
         columns: []ColumnExpression,
         source: *DataSource,
         where: ?*Expression,
+        t: ?*const common.TupleDescriptor = null,
 
         pub const ColumnExpression = union(enum) {
             normal: Normal,

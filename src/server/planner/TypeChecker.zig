@@ -1,3 +1,18 @@
+//! Type checking on the AST level
+//!
+//! This type checker is based on so-called "bi-directional type checking".
+//! In short, the idea is the following: for each expression we provide a
+//! "request" of what its type should be. This could be an exact type if it is
+//! known, or it could be "any type", or it could be something in between, like
+//! "any integer type". The type checker must provide a type that fulfills the
+//! request (or a type checking error). If the type request is vague, then
+//! the type checker is allowed to choose ("infer") a type from context.
+//! The algorithm is called "bi-directional" because the types go in both
+//! directions: both from top to bottom as "requests", and back from bottom
+//! to top as resulting types.
+//! The type checker memorizes the types and tuple descriptors in the AST, so
+//! that the planner can use that information later without recomputing it.
+
 const std = @import("std");
 
 const ast = @import("../sql/ast.zig");
@@ -91,15 +106,19 @@ pub fn findAttribute(
 ) Error!?usize {
     var result: ?usize = null;
     for (td.attrs.items, 0..) |att, i| {
+        // Use table name if it is given
         if (table) |tn|
             if (!std.ascii.eqlIgnoreCase(att.table_name, tn.text))
                 continue;
+        // Check the main name
         if (std.ascii.eqlIgnoreCase(att.name, name.text)) {
             if (result != null) {
+                // If we already found something before, we have an issue
                 t.addError("Name \"{s}\" is ambiguous, please specify a table", .{att.name});
                 return Error.AmbiguousName;
             }
             result = i;
+            // Remember the found id for future generations
             name.id = @intCast(i);
         }
     }
@@ -172,10 +191,12 @@ fn checkInsertValues(t: *TypeChecker, stmt: *ast.Statement.InsertValues) bool {
         }
         if (err) return false;
     } else {
+        // If no columns are given, assume the same descriptor
         input_descr.* = full_descr.*.clone(t.alloc);
         input_descr.has_extended = false;
     }
 
+    // Provide VALUES with expected descriptor
     stmt.values.t = input_descr;
 
     // Check the VALUES data source
@@ -183,7 +204,7 @@ fn checkInsertValues(t: *TypeChecker, stmt: *ast.Statement.InsertValues) bool {
 }
 
 /// Suggest a name for the column if no explicit alias is given
-fn suggestExpressionName(t: *TypeChecker, expr: ast.Expression) Error![]const u8 {
+fn suggestExpressionName(t: *TypeChecker, expr: ast.Expression) []const u8 {
     switch (expr.u) {
         .variable => |v| return v.name.text,
         .value => |v| switch (v) {
@@ -203,21 +224,37 @@ fn checkSelect(t: *TypeChecker, stmt: *ast.Statement.Select) bool {
     // Check the data source for input
     if (!t.checkDataSource(stmt.source, false)) return false;
 
+    const new_descr = t.alloc.create(TupleDescriptor) catch oom();
+    new_descr.* = .empty;
+
     // Go through output columns in the query
     var err = false;
     for (stmt.columns) |c| {
         // Build a scalar node for each expression
         switch (c) {
             .normal => |n| {
-                _ = t.checkExprType(n.expr, .any, stmt.source.t.?) catch {
+                const dbtype = t.checkExprType(n.expr, .any, stmt.source.t.?) catch {
                     err = true;
                     continue;
                 };
+                const name = if (n.alias) |a|
+                    a.text
+                else
+                    t.suggestExpressionName(n.expr.*);
+                new_descr.attrs.append(t.alloc, .{
+                    .name = name,
+                    .t = dbtype,
+                    .table_name = "",
+                }) catch oom();
             },
-            .star => {},
+            .star => {
+                new_descr.attrs.appendSlice(t.alloc, stmt.source.t.?.attrs.items) catch oom();
+            },
         }
     }
     if (err) return false;
+    // Save this descriptor for future generations
+    stmt.t = new_descr;
 
     // Check a WHERE clause
     if (stmt.where) |condition| {
@@ -234,6 +271,7 @@ fn checkSelect(t: *TypeChecker, stmt: *ast.Statement.Select) bool {
 
 /// Check UNION statement
 fn checkUnion(t: *TypeChecker, stmt: *ast.Statement.Union) bool {
+    // Type check all children
     var err = false;
     for (stmt.stmts) |*child| {
         if (!t.check(child)) {
@@ -245,6 +283,7 @@ fn checkUnion(t: *TypeChecker, stmt: *ast.Statement.Union) bool {
     if (err) return false;
     std.debug.assert(stmt.stmts.len > 0);
 
+    // All children must have the same tuple descriptor
     for (stmt.stmts) |source| {
         if (!source.select.source.t.?.eql(stmt.stmts[0].select.source.t.?)) {
             t.addError("Two sides of the UNION must match!", .{});
@@ -290,8 +329,10 @@ fn checkUpdate(t: *TypeChecker, stmt: *ast.Statement.Update) bool {
         };
     }
 
+    // Go through all the SET clauses
     var err = false;
     for (stmt.clauses) |*clause| {
+        // Find the column
         const col_id = t.findAttribute(
             full_descr,
             &clause.column,
@@ -306,6 +347,7 @@ fn checkUpdate(t: *TypeChecker, stmt: *ast.Statement.Update) bool {
             continue;
         }
 
+        // Check the expression
         _ = t.checkExprType(
             clause.expr,
             .{ .db = full_descr.attrs.items[col_id.?].t },
@@ -408,29 +450,32 @@ fn evalConstExpression(
     }
 }
 
+/// A request for a type, used for bi-directional type checking
 const TypeRequest = union(enum) {
     db: DBType, // Or rather, type implicitly convertible to this
     any_int: void,
     any_text: void,
     any: void,
 
-    fn fulfilled(r: TypeRequest, o: DBType) bool {
+    /// Can this request be fulfilled with a given type?
+    fn fulfilled(r: TypeRequest, t: DBType) bool {
         switch (r) {
-            .db => |rdb| return o.convertsTo(rdb),
-            .any_int => return o.isNumber(),
-            .any_text => return o == .text or o == .long_text,
+            .db => |rdb| return t.convertsTo(rdb),
+            .any_int => return t.isNumber(),
+            .any_text => return t == .text or t == .long_text,
             .any => return true,
         }
     }
 };
 
-/// Try to infer a type of an expression, given the context of the currently available variables.
+/// Infer the expression type, given context and a type request
 fn checkExprType(
     t: *TypeChecker,
     expr: *ast.Expression,
     request: TypeRequest,
     cxt: *const TupleDescriptor,
 ) Error!DBType {
+    // Calculate the resulting type
     const expr_type: DBType = expr_type: switch (expr.u) {
         .variable => |*v| { // Variable expression
             // Find the column
@@ -439,11 +484,12 @@ fn checkExprType(
                 t.addError("Can't find variable \"{s}\"", .{v.name.text});
                 return Error.UnknownName;
             }
-            // Construct the scalar node
+            // The type is the column's type in the context
             break :expr_type cxt.attrs.items[col_id.?].t;
         },
-        .value => |v| {
+        .value => |v| { // A constant value
             if (request == .db) {
+                // We are expected to provide a specific type, check if we can
                 switch (v) {
                     .int => if (!request.db.isNumber()) {
                         t.addError("Expected {} but got integer constant", .{request});
@@ -464,7 +510,7 @@ fn checkExprType(
                     },
                 }
                 break :expr_type request.db;
-            } else switch (v) {
+            } else switch (v) { // We can choose the type ourselves
                 .int => break :expr_type .int4,
                 .text => break :expr_type .text,
                 .boolean => break :expr_type .boolean,
@@ -479,7 +525,12 @@ fn checkExprType(
                     break :expr_type .boolean;
                 },
                 .neg => {
+                    // For simplicity, forward the same request to the child
                     const dbtype = try t.checkExprType(u.expr, request, cxt);
+                    // And check the validity afterwards
+                    if (!dbtype.isNumber()) {
+                        t.addError("Cannot use arithmetic operator on type {}", .{dbtype});
+                    }
                     break :expr_type dbtype;
                 },
                 .null, .not_null => {
@@ -491,8 +542,10 @@ fn checkExprType(
         .binary => |u| {
             switch (u.op) {
                 .add, .sub, .mul, .div => { // Can do arithmetic only on numbers
+                    // For simplicity, forward the same request to the child
                     const lhs = try t.checkExprType(u.left, request, cxt);
                     const rhs = try t.checkExprType(u.right, request, cxt);
+                    // And check the validity afterwards
                     if (!request.fulfilled(lhs)) {
                         t.addError("Cannot use arithmetic operator on type {}", .{lhs});
                         return Error.TypeError;
@@ -501,7 +554,8 @@ fn checkExprType(
                         t.addError("Cannot use arithmetic operator on type {}", .{rhs});
                         return Error.TypeError;
                     }
-                    break :expr_type lhs.maxIntType(rhs);
+                    std.debug.assert(std.meta.eql(lhs, rhs));
+                    break :expr_type lhs;
                 },
                 .@"and", .@"or" => { // Can do and/or only on booleans
                     _ = try t.checkExprType(u.left, .{ .db = .boolean }, cxt);
@@ -527,14 +581,18 @@ fn checkExprType(
         },
         .err => unreachable,
     };
+    // We got some type, is it actually what was requested?
     if (!request.fulfilled(expr_type)) {
         t.addError("Expected {} but got type {}", .{ request, expr_type });
         return Error.TypeError;
     }
     if (request == .db)
+        // If we were asked a specific type, then convert to it here
         expr.t = request.db
     else
+        // If it was vague, we are fine with whatever we decided on
         expr.t = expr_type;
+    // Fold constant expressions
     if (isConstExpression(expr.*) and expr.u != .value) {
         const v = try t.evalConstExpression(expr, cxt);
         expr.u = .{ .value = v };
@@ -542,6 +600,9 @@ fn checkExprType(
     return expr.t.?;
 }
 
+/// Type check a DataSource node
+/// need_extended is whether the outer statement requested to preserve extended
+/// fields of the original tuples.
 fn checkDataSource(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bool {
     switch (ds.u) {
         .table => return t.checkTableSource(ds),
@@ -551,11 +612,14 @@ fn checkDataSource(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bo
     }
 }
 
+/// Type check a raw table scan
 fn checkTableSource(t: *TypeChecker, ds: *ast.DataSource) bool {
     std.debug.assert(ds.u == .table);
+    // Find the table
     const table = t.findTable(&ds.u.table.name) catch return false;
     const full_descr = t.cat.descr.getPtr(table.rel_id).?;
     ds.t = full_descr;
+    // Rename the columns in the descriptor if we have an alias
     if (ds.alias) |ta| {
         const new = t.alloc.create(TupleDescriptor) catch oom();
         new.* = full_descr.clone(t.alloc);
@@ -566,14 +630,18 @@ fn checkTableSource(t: *TypeChecker, ds: *ast.DataSource) bool {
     return true;
 }
 
+/// Type check a join data source
 fn checkJoin(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bool {
+    // Type check both of the children
     const lhs_res = t.checkDataSource(ds.u.join.lhs, need_extended);
     const rhs_res = t.checkDataSource(ds.u.join.rhs, false);
     if (!lhs_res or !rhs_res) return false;
 
+    // Descriptors of the children
     const lhs = ds.u.join.lhs.t.?;
     const rhs = ds.u.join.rhs.t.?;
 
+    // Combined descriptor
     const new_descr = t.alloc.create(TupleDescriptor) catch oom();
     new_descr.* = lhs.clone(t.alloc);
     new_descr.attrs.ensureUnusedCapacity(
@@ -589,6 +657,7 @@ fn checkJoin(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bool {
             att.table_name = ta.text;
         ds.t = new_descr;
     }
+
     // Check the join condition
     if (ds.u.join.cond) |c|
         _ = t.checkExprType(c, .{ .db = .boolean }, new_descr) catch return false;
@@ -604,8 +673,8 @@ fn checkValues(
     std.debug.assert(ds.u == .values);
     std.debug.assert(ds.t != null);
 
-    var err = false;
     // Go through all the rows in the query
+    var err = false;
     for (ds.u.values.data) |row| {
         // Check the row lengths
         if (row.len != ds.t.?.len()) {

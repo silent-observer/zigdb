@@ -95,7 +95,7 @@ fn addError(p: *Planner, comptime fmt: []const u8, args: anytype) void {
     p.errors.append(p.alloc, str) catch oom();
 }
 
-/// Finds a table by its name
+/// Finds a table by its id
 fn findTable(p: *Planner, name: ast.Name) catalog.Entry(.zdb_rels) {
     // Scan through the catalog
     var scanner = p.cat.catalog.zdb_rels.scan(
@@ -129,35 +129,34 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     const table = p.findTable(stmt.name);
     const full_descr = p.cat.descr.getPtr(table.rel_id).?;
     // List of expressions for projection
-    var scalarNodes =
+    var scalar_node =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, full_descr.len()) catch oom();
-    var isScalarNodeFilled =
-        std.ArrayList(bool).initCapacity(p.alloc, full_descr.len()) catch oom();
+    var column_given =
+        std.DynamicBitSetUnmanaged.initEmpty(p.alloc, full_descr.len()) catch oom();
 
     // This is the descriptor of what we get as input data
     if (stmt.columns.len > 0) {
-        _ = scalarNodes.addManyAsSliceAssumeCapacity(full_descr.len());
-        isScalarNodeFilled.appendNTimesAssumeCapacity(false, full_descr.len());
+        _ = scalar_node.addManyAsSliceAssumeCapacity(full_descr.len());
 
         // Go through the columns in the statement
         for (stmt.columns, 0..) |col_name, i| {
             // col_id is the index in the physical table, i is the index in the query
             const col_id = col_name.id.?;
             // Build an expression for each physical column
-            scalarNodes.items[col_id] = .{
+            scalar_node.items[col_id] = .{
                 .action = .{ .column = @intCast(i) },
                 .dbtype = full_descr.attrs.items[col_id].t,
             };
-            isScalarNodeFilled.items[col_id] = true;
+            column_given.set(col_id);
         }
 
         // Fill in missing columns with default values
         for (
-            scalarNodes.items,
-            isScalarNodeFilled.items,
+            scalar_node.items,
             full_descr.attrs.items,
-        ) |*scalar, isFilled, att| {
-            if (isFilled) continue;
+            0..,
+        ) |*scalar, att, i| {
+            if (column_given.isSet(i)) continue;
             if (att.t == .serial) {
                 scalar.* = .{
                     .dbtype = att.t,
@@ -176,8 +175,8 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
             .descr = full_descr,
             .action = .{ .project = .{
                 .input = root,
-                .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
-                .op = if (scalarNodes.items.len > 0) .evaluate else .copy,
+                .exprs = scalar_node.toOwnedSlice(p.alloc) catch oom(),
+                .op = if (scalar_node.items.len > 0) .evaluate else .copy,
             } },
         });
     }
@@ -190,22 +189,6 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     } });
 }
 
-/// Suggest a name for the column if no explicit alias is given
-fn suggestExpressionName(p: *Planner, expr: ast.Expression) []const u8 {
-    switch (expr.u) {
-        .variable => |v| return v.name.text,
-        .value => |v| switch (v) {
-            .int => |i| return std.fmt.allocPrint(p.alloc, "{}", .{i}) catch oom(),
-            .boolean => |b| return if (b) "t" else "f",
-            .null => return "null",
-            .uuid => return "uuid",
-            .text => |s| return s.text(),
-        },
-        .unary, .binary => return "expr",
-        .err => unreachable,
-    }
-}
-
 /// Plan SELECT statement
 fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
     // Plan the data source for input
@@ -213,48 +196,27 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
     const input_node = p.planDataSource(source);
 
     // List of scalar nodes for expressions
-    var scalarNodes =
+    var scalar_nodes =
         std.ArrayList(Plan.ScalarNode).initCapacity(p.alloc, stmt.columns.len) catch oom();
-    var aliases =
-        std.ArrayList([]const u8).initCapacity(p.alloc, stmt.columns.len) catch oom();
     // Go through output columns in the query
     for (stmt.columns) |c| {
         // Build a scalar node for each expression
         switch (c) {
             .normal => |n| {
                 const node = p.planExpression(n.expr.*, input_node.descr);
-                scalarNodes.appendAssumeCapacity(node);
-                if (n.alias) |a|
-                    aliases.appendAssumeCapacity(a.text)
-                else
-                    aliases.appendAssumeCapacity(p.suggestExpressionName(n.expr.*));
+                scalar_nodes.appendAssumeCapacity(node);
             },
             .star => {
-                scalarNodes.ensureTotalCapacity(
+                scalar_nodes.ensureTotalCapacity(
                     p.alloc,
-                    scalarNodes.capacity + input_node.descr.len() - 1,
-                ) catch oom();
-                aliases.ensureTotalCapacity(
-                    p.alloc,
-                    scalarNodes.capacity + input_node.descr.len() - 1,
+                    scalar_nodes.capacity + input_node.descr.len() - 1,
                 ) catch oom();
 
                 for (input_node.descr.attrs.items, 0..) |att, i| {
-                    const node = p.planExpression(
-                        .{
-                            .u = .{ .variable = .{
-                                .name = .{
-                                    .text = att.name,
-                                    .id = @intCast(i),
-                                },
-                                .table = .{ .text = att.table_name },
-                            } },
-                            .t = att.t,
-                        },
-                        input_node.descr,
-                    );
-                    scalarNodes.appendAssumeCapacity(node);
-                    aliases.appendAssumeCapacity(att.name);
+                    scalar_nodes.appendAssumeCapacity(.{
+                        .action = .{ .column = @intCast(i) },
+                        .dbtype = att.t,
+                    });
                 }
             },
         }
@@ -277,23 +239,12 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
 
     // SELECT basically always needs a projection
     {
-        // Build the description
-        const new_descr = p.make(common.TupleDescriptor.empty);
-        new_descr.attrs.ensureTotalCapacity(p.alloc, stmt.columns.len) catch oom();
-        for (scalarNodes.items, aliases.items) |n, name| {
-            new_descr.attrs.appendAssumeCapacity(.{
-                .name = name,
-                .t = n.dbtype,
-                .table_name = "",
-            });
-        }
-
         // Make the projection node
         root = p.make(Plan.DataNode{
-            .descr = new_descr,
+            .descr = stmt.t.?,
             .action = .{ .project = .{
                 .input = root,
-                .exprs = scalarNodes.toOwnedSlice(p.alloc) catch oom(),
+                .exprs = scalar_nodes.toOwnedSlice(p.alloc) catch oom(),
                 .op = .evaluate,
             } },
         });
@@ -305,6 +256,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
 
 /// Plan UNION statement
 fn planUnion(p: *Planner, stmt: ast.Statement.Union) *Plan.Statement {
+    // Plan all children one by operation
     var sources = std.ArrayList(Plan.DataNode)
         .initCapacity(p.alloc, stmt.stmts.len) catch oom();
     for (stmt.stmts) |child| {
@@ -312,6 +264,7 @@ fn planUnion(p: *Planner, stmt: ast.Statement.Union) *Plan.Statement {
         std.debug.assert(child_plan.* == .select);
         sources.appendAssumeCapacity(child_plan.select.root.*);
 
+        // Clena up the data nodes we got
         p.alloc.destroy(child_plan.select.root);
         p.alloc.destroy(child_plan);
     }
@@ -383,6 +336,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
         });
     }
 
+    // Fill the SET data
     var cols = std.ArrayList(Plan.ColumnId)
         .initCapacity(p.alloc, stmt.clauses.len) catch oom();
     var vals = std.ArrayList(Plan.ScalarNode)
@@ -486,6 +440,10 @@ fn planNestedLoop(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
                 .output_format = .right_left,
             } },
         }),
+        // Full Join uses a special form:
+        //    select A.*, B.* from A full join B on COND
+        // = (select A.*, B.* from A left join B on COND) union all
+        //   (select NULL as A.*, B.* from B where not exists(select 1 from A where COND))
         .full => out: {
             const inputs = p.alloc.alloc(Plan.DataNode, 2) catch oom();
             inputs[0] = Plan.DataNode{
