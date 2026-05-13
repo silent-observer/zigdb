@@ -558,6 +558,18 @@ fn planExpression(
                 .dbtype = expr.t.?,
             };
         },
+        .func => |f| {
+            const children = p.alloc.alloc(Plan.ScalarNode, f.inputs.len) catch oom();
+            for (f.inputs, children) |i, *o|
+                o.* = p.planExpression(i, cxt);
+            return Plan.ScalarNode{
+                .action = .{ .func = .{
+                    .func = f.func,
+                    .inputs = children,
+                } },
+                .dbtype = expr.t.?,
+            };
+        },
         .value => unreachable, // This is supposed to be a constant
         .err => unreachable,
     }

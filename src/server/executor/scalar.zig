@@ -9,6 +9,7 @@ const common = @import("common");
 const oom = common.oom;
 const heap = @import("../heap.zig");
 const toaster = @import("../toaster.zig");
+const catalog = @import("../catalog.zig");
 
 /// Evaluate a scalar node in the context of some tuple
 pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Context) !common.Value {
@@ -87,6 +88,13 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Contex
                     return .{ .boolean = v };
                 },
             }
+        },
+        .func => |f| {
+            const values = cxt.alloc.alloc(common.Value, f.inputs.len) catch oom();
+            defer cxt.alloc.free(values);
+            for (f.inputs, values) |*i, *o|
+                o.* = try eval(i, tuple, cxt);
+            return try catalog.functions.evalScalarFunction(f.func, values, cxt.alloc);
         },
     }
 }

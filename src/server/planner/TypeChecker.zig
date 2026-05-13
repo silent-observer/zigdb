@@ -215,6 +215,7 @@ fn suggestExpressionName(t: *TypeChecker, expr: ast.Expression) []const u8 {
             .text => |s| return s.text(),
         },
         .unary, .binary => return "expr",
+        .func => |f| return @tagName(f.func),
         .err => unreachable,
     }
 }
@@ -367,6 +368,11 @@ fn isConstExpression(expr: ast.Expression) bool {
         .value => return true,
         .unary => |u| return isConstExpression(u.expr.*),
         .binary => |b| return isConstExpression(b.left.*) and isConstExpression(b.right.*),
+        .func => |f| {
+            for (f.inputs) |input|
+                if (!isConstExpression(input)) return false;
+            return true;
+        },
         .err => unreachable,
     }
 }
@@ -445,6 +451,13 @@ fn evalConstExpression(
                     return .{ .boolean = v };
                 },
             }
+        },
+        .func => |f| {
+            const values = t.alloc.alloc(common.Value, f.inputs.len) catch oom();
+            defer t.alloc.free(values);
+            for (f.inputs, values) |*i, *o|
+                o.* = try t.evalConstExpression(i, cxt);
+            return try catalog.functions.evalScalarFunction(f.func, values, t.alloc);
         },
         .err => unreachable,
     }
@@ -554,8 +567,7 @@ fn checkExprType(
                         t.addError("Cannot use arithmetic operator on type {}", .{rhs});
                         return Error.TypeError;
                     }
-                    std.debug.assert(std.meta.eql(lhs, rhs));
-                    break :expr_type lhs;
+                    break :expr_type lhs.maxIntType(rhs);
                 },
                 .@"and", .@"or" => { // Can do and/or only on booleans
                     _ = try t.checkExprType(u.left, .{ .db = .boolean }, cxt);
@@ -578,6 +590,44 @@ fn checkExprType(
                     break :expr_type .boolean;
                 },
             }
+        },
+        .func => |f| switch (f.func) {
+            .generate_series => unreachable,
+            .upper, .lower, .rtrim, .ltrim, .trim => {
+                if (f.inputs.len != 1) {
+                    t.addError("Expected 1 argument but got {}", .{f.inputs.len});
+                    return Error.TypeError;
+                }
+                const dbtype = try t.checkExprType(&f.inputs[0], .any_text, cxt);
+                break :expr_type dbtype;
+            },
+            .len => {
+                if (f.inputs.len != 1) {
+                    t.addError("Expected 1 argument but got {}", .{f.inputs.len});
+                    return Error.TypeError;
+                }
+                _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
+                break :expr_type .uint4;
+            },
+            .concat => {
+                if (f.inputs.len != 2) {
+                    t.addError("Expected 2 arguments but got {}", .{f.inputs.len});
+                    return Error.TypeError;
+                }
+                _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
+                _ = try t.checkExprType(&f.inputs[1], .any_text, cxt);
+                break :expr_type .text;
+            },
+            .substring => {
+                if (f.inputs.len != 3) {
+                    t.addError("Expected 3 arguments but got {}", .{f.inputs.len});
+                    return Error.TypeError;
+                }
+                _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
+                _ = try t.checkExprType(&f.inputs[1], .any_int, cxt);
+                _ = try t.checkExprType(&f.inputs[2], .any_int, cxt);
+                break :expr_type .text;
+            },
         },
         .err => unreachable,
     };

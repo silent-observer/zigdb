@@ -88,6 +88,7 @@ pub const Expression = struct {
         variable: Variable,
         unary: Unary,
         binary: Binary,
+        func: FunctionCall,
         value: common.Value,
         err: void,
     },
@@ -130,6 +131,11 @@ pub const Expression = struct {
             null,
             not_null,
         };
+    };
+
+    pub const FunctionCall = struct {
+        func: catalog.functions.FunctionId,
+        inputs: []Expression,
     };
 };
 

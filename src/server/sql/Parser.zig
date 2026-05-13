@@ -5,6 +5,7 @@
 const std = @import("std");
 const Lexer = @import("Lexer.zig");
 const ast = @import("ast.zig");
+const catalog = @import("../catalog.zig");
 const common = @import("common");
 const DBType = common.DBType;
 const oom = common.oom;
@@ -872,7 +873,9 @@ fn parseExpressionPratt(p: *Parser, min_bp: u8) ast.Expression {
 ///                  | STRING
 ///                  | "true"
 ///                  | "false"
-///                  | Name ('.' Name)?
+///                  | Name
+///                  | Name '.' Name
+///                  | Name "(" CommaList(Expression) ")"
 /// ```
 fn parseAtomicExpression(p: *Parser) ast.Expression {
     const t = p.peek();
@@ -950,6 +953,25 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         },
         .id => {
             const first = p.parseName() catch return .err;
+            if (p.eat(.{ .symbol = .lparen })) { // Function
+                const args =
+                    p.parseCommaList(ast.Expression, parseExpression);
+                p.expectSymbol(.rparen) catch return .err;
+                const id = catalog.functions.function_map.get(first.text);
+                if (id == null) {
+                    p.addError(
+                        t,
+                        "Can't find a function named \"{s}\"",
+                        .{t.text(p.input)},
+                    );
+                    return .err;
+                }
+                return .{ .u = .{ .func = .{
+                    .func = id.?,
+                    .inputs = args,
+                } } };
+            }
+
             const second = if (p.eat(.{ .symbol = .dot }))
                 p.parseName() catch return .err
             else

@@ -5,6 +5,7 @@ const std = @import("std");
 const common = @import("common");
 const ids = common.ids;
 const ast = @import("../sql/ast.zig");
+const catalog = @import("../catalog.zig");
 
 /// This is a column index inside a given tuple descriptor.
 pub const ColumnId = u16;
@@ -191,6 +192,7 @@ pub const ScalarNode = struct {
         value: common.Value, // Constant value
         unary: Unary, // Unary operation
         binary: Binary, // Binary operation
+        func: FunctionCall, // Function call
         next_serial: ids.TableId, // Auto generate the next serial ID
     };
 
@@ -207,5 +209,10 @@ pub const ScalarNode = struct {
         right: *ScalarNode,
 
         pub const Op = ast.Expression.Binary.Op;
+    };
+
+    pub const FunctionCall = struct {
+        func: catalog.functions.FunctionId,
+        inputs: []ScalarNode,
     };
 };
