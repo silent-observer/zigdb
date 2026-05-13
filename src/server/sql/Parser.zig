@@ -428,55 +428,76 @@ fn parseDataSource(p: *Parser) ast.DataSource {
 }
 
 /// Parse an atomic data source: either a table or a parenthesized expression
-/// AtomicDataSource = Name ("AS"? Name)?
-///                  | "(" DataSource ")" ("AS"? Name)?
+/// AtomicDataSource = RawDataSource Alias?
+/// RawDataSource = Name
+///               | Name "(" CommaList(Expression)? ")"
+///               | "(" DataSource ")"
+/// Alias = "AS"? Name
 fn parseAtomicDataSource(p: *Parser) ast.DataSource {
     const t = p.peek();
-    switch (t.kind) {
+    var ds = ds: switch (t.kind) {
         .id => {
             const name = p.parseName() catch return .err;
-            const has_alias =
-                p.peek().kind == .id or
-                p.eat(.{ .keyword = .as });
-            const table_alias = if (has_alias)
-                p.parseName() catch return .err
-            else
-                null;
-            return .{
-                .u = .{ .table = .{
-                    .name = name,
-                } },
-                .alias = table_alias,
-            };
+            if (p.eat(.{ .symbol = .lparen })) { // Function
+                const args: []ast.Expression = if (!p.peek().matches(.{ .symbol = .rparen }))
+                    p.parseCommaList(ast.Expression, parseExpression)
+                else
+                    &.{};
+
+                p.expectSymbol(.rparen) catch return .err;
+                const id = catalog.functions.srf_function_map.get(name.text);
+                if (id == null) {
+                    p.addError(
+                        t,
+                        "Can't find a function named \"{s}\"",
+                        .{t.text(p.input)},
+                    );
+                    return .err;
+                }
+                break :ds ast.DataSource{ .u = .{ .func = .{
+                    .func = id.?,
+                    .inputs = args,
+                } } };
+            } else {
+                break :ds ast.DataSource{
+                    .u = .{ .table = .{
+                        .name = name,
+                    } },
+                };
+            }
         },
         .symbol => |s| switch (s) {
             .lparen => {
                 p.advance();
-                var ds = p.parseDataSource();
+                const ds = p.parseDataSource();
                 p.expectSymbol(.rparen) catch return .err;
-                const has_alias =
-                    p.peek().kind == .id or
-                    p.eat(.{ .keyword = .as });
-                const table_alias = if (has_alias)
-                    p.parseName() catch return .err
-                else
-                    null;
-                if (table_alias) |ta| {
-                    ds.alias = ta;
-                }
-                return ds;
+                break :ds ds;
             },
-            else => {},
+            else => {
+                p.addError(
+                    t,
+                    "Expected a data source but got \"{s}\"",
+                    .{t.text(p.input)},
+                );
+                return .err;
+            },
         },
-        else => {},
-    }
+        else => {
+            p.addError(
+                t,
+                "Expected a data source but got \"{s}\"",
+                .{t.text(p.input)},
+            );
+            return .err;
+        },
+    };
 
-    p.addError(
-        t,
-        "Expected a data source but got \"{s}\"",
-        .{t.text(p.input)},
-    );
-    return .err;
+    const has_alias =
+        p.peek().kind == .id or
+        p.eat(.{ .keyword = .as });
+    if (has_alias)
+        ds.alias = p.parseName() catch return .err;
+    return ds;
 }
 /// Parse an INSERT statement. Currently only VALUES form is supported.
 /// ```
@@ -954,10 +975,12 @@ fn parseAtomicExpression(p: *Parser) ast.Expression {
         .id => {
             const first = p.parseName() catch return .err;
             if (p.eat(.{ .symbol = .lparen })) { // Function
-                const args =
-                    p.parseCommaList(ast.Expression, parseExpression);
+                const args: []ast.Expression = if (!p.peek().matches(.{ .symbol = .rparen }))
+                    p.parseCommaList(ast.Expression, parseExpression)
+                else
+                    &.{};
                 p.expectSymbol(.rparen) catch return .err;
-                const id = catalog.functions.function_map.get(first.text);
+                const id = catalog.functions.scalar_function_map.get(first.text);
                 if (id == null) {
                     p.addError(
                         t,

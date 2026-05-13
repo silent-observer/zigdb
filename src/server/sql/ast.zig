@@ -134,7 +134,7 @@ pub const Expression = struct {
     };
 
     pub const FunctionCall = struct {
-        func: catalog.functions.FunctionId,
+        func: catalog.functions.ScalarFunctionId,
         inputs: []Expression,
     };
 };
@@ -146,6 +146,7 @@ pub const DataSource = struct {
         table: Table,
         join: Join,
         values: Values,
+        func: FunctionCall,
         err: void,
     },
 
@@ -172,6 +173,11 @@ pub const DataSource = struct {
 
     pub const Values = struct {
         data: [][]Expression,
+    };
+
+    pub const FunctionCall = struct {
+        func: catalog.functions.SetReturningFunctionId,
+        inputs: []Expression,
     };
 };
 
