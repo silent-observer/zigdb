@@ -12,6 +12,7 @@ const project = @import("project.zig");
 const filter = @import("filter.zig");
 const nested_loop = @import("nested_loop.zig");
 const union_all = @import("union_all.zig");
+const srf = @import("srf.zig");
 const common = @import("common");
 const heap = @import("../heap.zig");
 const oom = common.oom;
@@ -133,6 +134,7 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
         .filter => filter.init(plan, cxt),
         .nested_loop => nested_loop.init(plan, cxt),
         .union_all => union_all.init(plan, cxt),
+        .func => srf.init(plan, cxt),
     };
     r catch |err| {
         Logger.err("{} during Plan init", .{err});
@@ -149,6 +151,7 @@ pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
         .filter => return filter.deinit(plan, cxt),
         .nested_loop => return nested_loop.deinit(plan, cxt),
         .union_all => return union_all.deinit(plan, cxt),
+        .func => return srf.deinit(plan, cxt),
     }
 }
 
@@ -161,6 +164,7 @@ pub fn rewindDataNode(plan: *Plan.DataNode) Error!void {
         .filter => filter.rewind(plan),
         .nested_loop => nested_loop.rewind(plan),
         .union_all => union_all.rewind(plan),
+        .func => srf.rewind(plan),
     };
     r catch |err| {
         Logger.err("{} during Plan rewind", .{err});
@@ -177,6 +181,7 @@ pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple 
         .filter => filter.next(plan, cxt),
         .nested_loop => nested_loop.next(plan, cxt),
         .union_all => union_all.next(plan, cxt),
+        .func => srf.next(plan, cxt),
     };
     return r catch |err| {
         Logger.err("{} during execution", .{err});

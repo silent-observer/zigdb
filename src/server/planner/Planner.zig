@@ -203,7 +203,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
         // Build a scalar node for each expression
         switch (c) {
             .normal => |n| {
-                const node = p.planExpression(n.expr.*, input_node.descr);
+                const node = p.planExpression(n.expr.*);
                 scalar_nodes.appendAssumeCapacity(node);
             },
             .star => {
@@ -226,7 +226,7 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*, root.descr));
+        const expr = p.make(p.planExpression(condition.*));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -293,7 +293,7 @@ fn planDelete(p: *Planner, stmt: ast.Statement.Delete) *Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*, root.descr));
+        const expr = p.make(p.planExpression(condition.*));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -325,7 +325,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
     var root = input_node;
     // Add a filter if we have a WHERE clause
     if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*, root.descr));
+        const expr = p.make(p.planExpression(condition.*));
 
         root = p.make(Plan.DataNode{
             .descr = root.descr,
@@ -343,7 +343,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
         .initCapacity(p.alloc, stmt.clauses.len) catch oom();
 
     for (stmt.clauses) |clause| {
-        const val = p.planExpression(clause.expr.*, root.descr);
+        const val = p.planExpression(clause.expr.*);
 
         cols.appendAssumeCapacity(@intCast(clause.column.id.?));
         vals.appendAssumeCapacity(val);
@@ -366,6 +366,7 @@ fn planDataSource(p: *Planner, source: *const ast.DataSource) *Plan.DataNode {
         .table => return p.planFullScan(source),
         .join => return p.planNestedLoop(source),
         .values => return p.planValues(source),
+        .func => return p.planSRF(source),
         .err => unreachable,
     }
 }
@@ -387,7 +388,7 @@ fn planNestedLoop(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
     const rhs = p.planDataSource(ds.u.join.rhs);
     // Plan the join condition
     const cond = if (ds.u.join.cond) |c|
-        p.make(p.planExpression(c.*, ds.t.?))
+        p.make(p.planExpression(c.*))
     else
         null;
 
@@ -515,12 +516,28 @@ fn planValues(
     });
 }
 
-/// Plan the scalar node for an expression (in the context of some tuple descriptor).
-fn planExpression(
+/// Plan a data source node for a set returning function
+fn planSRF(
     p: *Planner,
-    expr: ast.Expression,
-    cxt: *const common.TupleDescriptor,
-) Plan.ScalarNode {
+    ds: *const ast.DataSource,
+) *Plan.DataNode {
+    // Plan the sub-expressions
+    const children = p.alloc.alloc(Plan.ScalarNode, ds.u.func.inputs.len) catch oom();
+    for (ds.u.func.inputs, children) |i, *o|
+        o.* = p.planExpression(i);
+
+    // Build the data source node
+    return p.make(Plan.DataNode{
+        .descr = ds.t.?,
+        .action = .{ .func = .{
+            .func = ds.u.func.func,
+            .inputs = children,
+        } },
+    });
+}
+
+/// Plan the scalar node for an expression (in the context of some tuple descriptor).
+fn planExpression(p: *Planner, expr: ast.Expression) Plan.ScalarNode {
     // Fast path for constant expressions
     if (expr.u == .value) {
         return Plan.ScalarNode{
@@ -537,7 +554,7 @@ fn planExpression(
             };
         },
         .unary => |u| {
-            const child = p.make(p.planExpression(u.expr.*, cxt));
+            const child = p.make(p.planExpression(u.expr.*));
             return Plan.ScalarNode{
                 .action = .{ .unary = .{
                     .op = u.op,
@@ -547,8 +564,8 @@ fn planExpression(
             };
         },
         .binary => |b| {
-            const left = p.make(p.planExpression(b.left.*, cxt));
-            const right = p.make(p.planExpression(b.right.*, cxt));
+            const left = p.make(p.planExpression(b.left.*));
+            const right = p.make(p.planExpression(b.right.*));
             return Plan.ScalarNode{
                 .action = .{ .binary = .{
                     .op = b.op,
@@ -561,7 +578,7 @@ fn planExpression(
         .func => |f| {
             const children = p.alloc.alloc(Plan.ScalarNode, f.inputs.len) catch oom();
             for (f.inputs, children) |i, *o|
-                o.* = p.planExpression(i, cxt);
+                o.* = p.planExpression(i);
             return Plan.ScalarNode{
                 .action = .{ .func = .{
                     .func = f.func,

@@ -381,7 +381,6 @@ fn isConstExpression(expr: ast.Expression) bool {
 fn evalConstExpression(
     t: *TypeChecker,
     expr: *ast.Expression,
-    cxt: *const common.TupleDescriptor,
 ) Error!common.Value {
     switch (expr.u) {
         .variable => |v| {
@@ -390,7 +389,7 @@ fn evalConstExpression(
         },
         .value => |v| return v,
         .unary => |u| {
-            const x = try t.evalConstExpression(u.expr, cxt);
+            const x = try t.evalConstExpression(u.expr);
             switch (u.op) {
                 .null => return .{ .boolean = x == .null },
                 .not_null => return .{ .boolean = x != .null },
@@ -407,8 +406,8 @@ fn evalConstExpression(
             }
         },
         .binary => |b| {
-            const lhs = try t.evalConstExpression(b.left, cxt);
-            const rhs = try t.evalConstExpression(b.right, cxt);
+            const lhs = try t.evalConstExpression(b.left);
+            const rhs = try t.evalConstExpression(b.right);
             if (lhs == .null or rhs == .null)
                 return .null;
             switch (b.op) {
@@ -456,7 +455,7 @@ fn evalConstExpression(
             const values = t.alloc.alloc(common.Value, f.inputs.len) catch oom();
             defer t.alloc.free(values);
             for (f.inputs, values) |*i, *o|
-                o.* = try t.evalConstExpression(i, cxt);
+                o.* = try t.evalConstExpression(i);
             return try catalog.functions.evalScalarFunction(f.func, values, t.alloc);
         },
         .err => unreachable,
@@ -486,19 +485,24 @@ fn checkExprType(
     t: *TypeChecker,
     expr: *ast.Expression,
     request: TypeRequest,
-    cxt: *const TupleDescriptor,
+    cxt: ?*const TupleDescriptor,
 ) Error!DBType {
     // Calculate the resulting type
     const expr_type: DBType = expr_type: switch (expr.u) {
         .variable => |*v| { // Variable expression
+            // Can't find anything without a context
+            if (cxt == null) {
+                t.addError("Can't find variable \"{s}\"", .{v.name.text});
+                return Error.UnknownName;
+            }
             // Find the column
-            const col_id = try t.findAttribute(cxt, &v.name, v.table);
+            const col_id = try t.findAttribute(cxt.?, &v.name, v.table);
             if (col_id == null) {
                 t.addError("Can't find variable \"{s}\"", .{v.name.text});
                 return Error.UnknownName;
             }
             // The type is the column's type in the context
-            break :expr_type cxt.attrs.items[col_id.?].t;
+            break :expr_type cxt.?.attrs.items[col_id.?].t;
         },
         .value => |v| { // A constant value
             if (request == .db) {
@@ -592,7 +596,6 @@ fn checkExprType(
             }
         },
         .func => |f| switch (f.func) {
-            .generate_series => unreachable,
             .upper, .lower, .rtrim, .ltrim, .trim => {
                 if (f.inputs.len != 1) {
                     t.addError("Expected 1 argument but got {}", .{f.inputs.len});
@@ -644,7 +647,7 @@ fn checkExprType(
         expr.t = expr_type;
     // Fold constant expressions
     if (isConstExpression(expr.*) and expr.u != .value) {
-        const v = try t.evalConstExpression(expr, cxt);
+        const v = try t.evalConstExpression(expr);
         expr.u = .{ .value = v };
     }
     return expr.t.?;
@@ -658,6 +661,7 @@ fn checkDataSource(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bo
         .table => return t.checkTableSource(ds),
         .join => return t.checkJoin(ds, need_extended),
         .values => return t.checkValues(ds),
+        .func => return t.checkSRF(ds),
         .err => unreachable,
     }
 }
@@ -746,4 +750,42 @@ fn checkValues(
     }
 
     return !err;
+}
+
+/// Type check a join data source
+fn checkSRF(t: *TypeChecker, ds: *ast.DataSource) bool {
+    if (ds.alias == null) {
+        t.addError(
+            "Set-returning functions like {s} must have an alias!",
+            .{@tagName(ds.u.func.func)},
+        );
+        return false;
+    }
+
+    const new_descr = t.alloc.create(TupleDescriptor) catch oom();
+    new_descr.* = .empty;
+
+    switch (ds.u.func.func) {
+        .generate_series => {
+            if (ds.u.func.inputs.len != 2 and ds.u.func.inputs.len != 3) {
+                t.addError("Expected 2 or 3 arguments but got {}", .{ds.u.func.inputs.len});
+                return false;
+            }
+            const dbtype = t.checkExprType(&ds.u.func.inputs[0], .any_int, null) catch return false;
+            _ = t.checkExprType(&ds.u.func.inputs[1], .any_int, null) catch return false;
+            if (ds.u.func.inputs.len == 3)
+                _ = t.checkExprType(&ds.u.func.inputs[2], .any_int, null) catch return false;
+
+            new_descr.attrs.append(t.alloc, .{
+                .name = ds.alias.?.text,
+                .t = dbtype,
+                .table_name = "",
+            }) catch oom();
+        },
+    }
+
+    for (new_descr.attrs.items) |*att|
+        att.table_name = ds.alias.?.text;
+    ds.t = new_descr;
+    return true;
 }

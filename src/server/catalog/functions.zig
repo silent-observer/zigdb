@@ -1,9 +1,8 @@
 const std = @import("std");
 const common = @import("common");
 
-/// Fixed function ids of built-in functions.
-pub const FunctionId = enum {
-    generate_series,
+/// Function ids of built-in scalar functions.
+pub const ScalarFunctionId = enum {
     upper,
     lower,
     concat,
@@ -14,25 +13,48 @@ pub const FunctionId = enum {
     substring,
 };
 
+/// Function ids of built-in set returning functions.
+pub const SetReturningFunctionId = enum {
+    generate_series,
+};
+
 /// Comptime-generated string map for all function names.
 /// Lookups ignore case, making it an efficient way to check if a string is a keyword.
-pub const function_map = std.StaticStringMapWithEql(
-    FunctionId,
+pub const scalar_function_map = std.StaticStringMapWithEql(
+    ScalarFunctionId,
     std.static_string_map.eqlAsciiIgnoreCase,
 ).initComptime(block: {
-    const KeywordEntry = struct { []const u8, FunctionId };
-    const count = std.enums.values(FunctionId).len;
+    const KeywordEntry = struct { []const u8, ScalarFunctionId };
+    const count = std.enums.values(ScalarFunctionId).len;
     // Make an array of keyword entries, each containing its text and enum value
     var result: [count]KeywordEntry = undefined;
     // Go through all possible keywords and fill the array
-    for (std.enums.values(FunctionId), 0..) |id, i| {
+    for (std.enums.values(ScalarFunctionId), 0..) |id, i| {
         result[i] = .{ @tagName(id), id };
     }
     // Build a string map from it
     break :block result;
 });
 
-pub fn evalScalarFunction(id: FunctionId, inputs: []common.Value, alloc: std.mem.Allocator) !common.Value {
+/// Comptime-generated string map for all function names.
+/// Lookups ignore case, making it an efficient way to check if a string is a keyword.
+pub const srf_function_map = std.StaticStringMapWithEql(
+    SetReturningFunctionId,
+    std.static_string_map.eqlAsciiIgnoreCase,
+).initComptime(block: {
+    const KeywordEntry = struct { []const u8, SetReturningFunctionId };
+    const count = std.enums.values(SetReturningFunctionId).len;
+    // Make an array of keyword entries, each containing its text and enum value
+    var result: [count]KeywordEntry = undefined;
+    // Go through all possible keywords and fill the array
+    for (std.enums.values(SetReturningFunctionId), 0..) |id, i| {
+        result[i] = .{ @tagName(id), id };
+    }
+    // Build a string map from it
+    break :block result;
+});
+
+pub fn evalScalarFunction(id: ScalarFunctionId, inputs: []common.Value, alloc: std.mem.Allocator) !common.Value {
     switch (id) {
         .upper => {
             std.debug.assert(inputs.len == 1);
@@ -102,18 +124,20 @@ pub fn evalScalarFunction(id: FunctionId, inputs: []common.Value, alloc: std.mem
             const e = s + @as(usize, @intCast(inputs[2].int));
             return .{ .text = .makeRaw(t[s..e]) };
         },
-        else => unreachable,
     }
 }
 
 const GenerateSeriesState = struct {
-    current: i64,
+    descr: *const common.TupleDescriptor,
+    start: i64,
     end: i64,
     step: i64,
+    current: i64,
 };
 
 pub fn initSetReturningFunction(
-    id: FunctionId,
+    id: SetReturningFunctionId,
+    descr: *const common.TupleDescriptor,
     inputs: []common.Value,
     alloc: std.mem.Allocator,
 ) !*anyopaque {
@@ -127,45 +151,58 @@ pub fn initSetReturningFunction(
 
             const state = alloc.create(GenerateSeriesState) catch common.oom();
             state.* = .{
-                .current = inputs[0].int,
+                .descr = descr,
+                .start = inputs[0].int,
                 .end = inputs[1].int,
                 .step = if (inputs.len == 3) inputs[2].int else 1,
+                .current = inputs[0].int,
             };
             return state;
         },
-        else => unreachable,
     }
 }
 
 pub fn deinitSetReturningFunction(
-    id: FunctionId,
+    id: SetReturningFunctionId,
     state: *anyopaque,
     alloc: std.mem.Allocator,
 ) void {
     switch (id) {
         .generate_series => {
-            const s: *GenerateSeriesState = @ptrCast(state);
+            const s: *GenerateSeriesState = @ptrCast(@alignCast(state));
             alloc.destroy(s);
         },
-        else => unreachable,
+    }
+}
+
+pub fn rewindSetReturningFunction(
+    id: SetReturningFunctionId,
+    state: *anyopaque,
+) void {
+    switch (id) {
+        .generate_series => {
+            const s: *GenerateSeriesState = @ptrCast(@alignCast(state));
+            s.current = s.start;
+        },
     }
 }
 
 pub fn execSetReturningFunction(
-    id: FunctionId,
+    id: SetReturningFunctionId,
     state: *anyopaque,
     alloc: std.mem.Allocator,
-) !?common.Value {
-    _ = alloc;
+) !?common.MemTuple {
     switch (id) {
         .generate_series => {
-            const s: *GenerateSeriesState = @ptrCast(state);
+            const s: *GenerateSeriesState = @ptrCast(@alignCast(state));
             const result = s.current;
-            if (result < s.end) {
+            if (result <= s.end) {
                 s.current += s.step;
-                return .{ .int = result };
+
+                var b: common.MemTuple.Builder = .init(alloc, s.descr);
+                b.pushValue(.{ .int = result });
+                return b.finalize();
             } else return null;
         },
-        else => unreachable,
     }
 }

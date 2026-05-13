@@ -92,6 +92,7 @@ pub const DataNode = struct {
         project: Project,
         filter: Filter,
         nested_loop: NestedLoop,
+        func: FunctionCall,
         union_all: UnionAll,
 
         /// Performs a full scan of some table
@@ -168,6 +169,11 @@ pub const DataNode = struct {
                 left_only,
             };
         };
+
+        pub const FunctionCall = struct {
+            func: catalog.functions.SetReturningFunctionId,
+            inputs: []ScalarNode,
+        };
     };
 
     /// Format the DataNode as JSON (skipping private `state` field)
@@ -212,7 +218,7 @@ pub const ScalarNode = struct {
     };
 
     pub const FunctionCall = struct {
-        func: catalog.functions.FunctionId,
+        func: catalog.functions.ScalarFunctionId,
         inputs: []ScalarNode,
     };
 };
