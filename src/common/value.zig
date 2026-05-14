@@ -27,18 +27,6 @@ pub const Text = union(enum) {
         InvalidTextFormat,
     };
 
-    /// Parse Text value from raw bytes
-    pub fn fromBytes(bytes: []const u8) Text {
-        return switch (bytes[0]) {
-            0x00 => .{ .raw = bytes[1..] },
-            0x01 => .{ .toast = std.mem.bytesToValue(
-                Toast,
-                bytes[1..],
-            ) },
-            else => unreachable,
-        };
-    }
-
     /// Create a raw Text object
     pub fn makeRaw(str: []const u8) Text {
         return .{ .raw = str };
@@ -60,13 +48,12 @@ pub const Text = union(enum) {
         }
     }
 
-    fn read(
+    pub fn read(
         r: *std.Io.Reader,
-        alloc: std.mem.Allocator,
     ) !Text {
         const size = try r.takeLeb128(i32);
         if (size >= 0) {
-            return makeRaw(r.readAlloc(alloc, @intCast(size)) catch oom());
+            return makeRaw(try r.take(@intCast(size)));
         } else if (size == -1) {
             const toast_table_id = try r.takeInt(ids.TableId, .little);
             const real_size = try r.takeInt(u32, .little);
@@ -79,7 +66,7 @@ pub const Text = union(enum) {
         } else return ParsingError.InvalidTextFormat;
     }
 
-    fn write(
+    pub fn write(
         self: *const Text,
         w: *std.Io.Writer,
     ) !void {
@@ -108,7 +95,14 @@ pub const Value = union(enum) {
     null: void,
 
     /// Obtain comptime-known type from a Value.
-    pub fn to(comptime T: type, v: Value) Error!T {
+    pub fn to(v: Value, comptime T: type) Error!T {
+        if (@typeInfo(T) == .optional) {
+            if (v == .null)
+                return null
+            else
+                return try v.to(@typeInfo(T).optional.child);
+        }
+
         switch (T) {
             i8, i16, i32, i64, u8, u16, u32, u64 => if (v == .int)
                 return @intCast(v.int)
@@ -128,6 +122,24 @@ pub const Value = union(enum) {
                 return Error.InvalidType,
             else => return Error.InvalidType,
         }
+    }
+
+    /// Obtain comptime-known type from a Value.
+    pub fn from(comptime T: type, v: T) Value {
+        if (@typeInfo(T) == .optional) {
+            if (v == null)
+                return .null
+            else
+                return from(@typeInfo(T).optional.child, v.?);
+        }
+
+        return switch (T) {
+            i8, i16, i32, i64, u8, u16, u32, u64 => .{ .int = @intCast(v) },
+            Text => .{ .text = v },
+            bool => .{ .boolean = v },
+            uuid.Uuid => .{ .uuid = v },
+            else => comptime unreachable,
+        };
     }
 
     /// Check if type of Value matches given DBType.
@@ -187,7 +199,6 @@ pub const Value = union(enum) {
     pub fn read(
         r: *std.Io.Reader,
         dbtype: t.DBType,
-        alloc: std.mem.Allocator,
     ) !Value {
         switch (dbtype) {
             .uint1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
@@ -201,7 +212,7 @@ pub const Value = union(enum) {
             .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
             .boolean => return .{ .boolean = try r.takeByte() != 0 },
             .nulltype => return .null,
-            .text, .long_text => return .{ .text = try Text.read(r, alloc) },
+            .text, .long_text => return .{ .text = try Text.read(r) },
         }
     }
 

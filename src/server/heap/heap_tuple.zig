@@ -42,7 +42,7 @@ pub fn read(
         if (is_null)
             b.pushValue(.null)
         else
-            b.pushValue(try common.Value.read(r, att.t, alloc));
+            b.pushValue(try common.Value.read(r, att.t));
     }
     b.addExtended(.{
         .xmin = .{ .v = xmin },

@@ -231,42 +231,13 @@ pub const MemTuple = struct {
         return .{ .ptr = @ptrCast(bytes) };
     }
 
-    /// Get i-th attribute with a comptime-known type T.
-    pub fn get(self: MemTuple, T: type, i: usize) T {
-        const data: []const u8 = self.dataPtr(i);
-        if (@typeInfo(T) == .optional) {
-            if (data.len == 0)
-                return null
-            else
-                return self.get(@typeInfo(T).optional.child, i);
-        }
-        std.debug.assert(self.dbtype(i).checkType(T));
-        return switch (T) {
-            u8, u16, u32, u64, i8, i16, i32, i64, bool => std.mem.bytesToValue(T, data),
-            Text => Text.fromBytes(data),
-            else => comptime unreachable,
-        };
-    }
-
     /// Get i-th attribute with a runtime-known type.
     pub fn getValue(self: MemTuple, i: usize) Value {
         const data: []const u8 = self.dataPtr(i);
+        var r = std.Io.Reader.fixed(data);
         if (data.len == 0)
             return .null;
-        return switch (self.dbtype(i)) {
-            .int1 => return .{ .int = @intCast(std.mem.bytesToValue(i8, data)) },
-            .int2 => return .{ .int = @intCast(std.mem.bytesToValue(i16, data)) },
-            .int4 => return .{ .int = @intCast(std.mem.bytesToValue(i32, data)) },
-            .int8 => return .{ .int = @intCast(std.mem.bytesToValue(i64, data)) },
-            .uint1 => return .{ .int = @intCast(std.mem.bytesToValue(u8, data)) },
-            .uint2 => return .{ .int = @intCast(std.mem.bytesToValue(u16, data)) },
-            .uint4, .oid => return .{ .int = @intCast(std.mem.bytesToValue(u32, data)) },
-            .uint8, .serial => return .{ .int = @intCast(std.mem.bytesToValue(u64, data)) },
-            .boolean => return .{ .boolean = std.mem.bytesToValue(bool, data) },
-            .uuid => return .{ .uuid = @intCast(std.mem.bytesToValue(uuid.Uuid, data)) },
-            .text, .long_text => return .{ .text = Text.fromBytes(data) },
-            .nulltype => return .null,
-        };
+        return Value.read(&r, self.dbtype(i)) catch unreachable;
     }
 
     /// Set i-th attribute with a comptime-known type T.
@@ -312,35 +283,36 @@ pub const MemTuple = struct {
     /// Use this whenever you want to create a MemTuple.
     pub const Builder = struct {
         gpa: std.mem.Allocator, // Allocator used for the MemTuple
-        arr: std.ArrayListAligned(
-            u8,
-            std.mem.Alignment.fromByteUnits(@alignOf(MemTuple.Data)),
-        ), // Actual data represented as array of bytes
+        writer: std.Io.Writer.Allocating, // Actual data represented as array of bytes
         offset: u16, // Current data offset
         index: usize, // Current attribute index
         extended: bool, // Did we add extended fields?
 
         /// Current tuple (still in construction)
         fn tuple(b: *Builder) MemTuple {
-            return .{ .ptr = @ptrCast(&b.arr.items[0]) };
+            return .{ .ptr = @ptrCast(@alignCast(b.writer.written().ptr)) };
         }
 
         /// Initialize a new builder. TupleDescriptor must be given immediately.
         pub fn init(gpa: std.mem.Allocator, descr: *const t.TupleDescriptor) Builder {
-            const has_ext = descr.has_extended;
-            const header_size = @sizeOf(MemTuple.Header) +
-                @as(usize, if (has_ext) @sizeOf(MemTuple.ExtendedFields) else 0) +
-                (descr.len() + 1) * @sizeOf(u16);
             // Array is initialized with approximate capacity.
-            var arr = @FieldType(Builder, "arr")
-                .initCapacity(gpa, header_size + descr.approximateWidth()) catch oom();
-            const ptr = arr.addManyAsSliceAssumeCapacity(header_size);
-            const new_tuple: MemTuple = .{ .ptr = @ptrCast(@alignCast(&ptr[0])) };
-            new_tuple.ptr.h.descr = descr;
-            new_tuple.offsetPtr(0).* = 0; // First offset is always 0
+            var writer = std.Io.Writer.Allocating.initAligned(
+                gpa,
+                .fromByteUnits(@alignOf(MemTuple.Data)),
+            );
+            writer.writer.writeStruct(
+                Header{ .descr = descr },
+                .native,
+            ) catch oom();
+
+            if (descr.has_extended)
+                _ = writer.writer.splatByteAll(0xAA, @sizeOf(ExtendedFields)) catch oom();
+            writer.writer.writeInt(u16, 0, .native) catch oom();
+            _ = writer.writer.splatByteAll(0xAA, descr.len() * @sizeOf(u16)) catch oom();
+
             return .{
                 .gpa = gpa,
-                .arr = arr,
+                .writer = writer,
                 .offset = 0,
                 .index = 0,
                 .extended = false,
@@ -353,49 +325,18 @@ pub const MemTuple = struct {
             b.index += 1;
             std.debug.assert(b.index <= b.tuple().len());
             b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
-            b.arr.appendSlice(b.gpa, bytes) catch oom();
+            b.writer.writer.writeAll(bytes) catch oom();
         }
 
         /// Push a Text value into the data section.
         fn pushText(b: *Builder, text: Text) void {
-            switch (text) {
-                .raw => |r| {
-                    b.offset += @intCast(1 + r.len);
-                    b.index += 1;
-                    std.debug.assert(b.index <= b.tuple().len());
-                    b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
-                    b.arr.append(b.gpa, 0x00) catch oom();
-                    b.arr.appendSlice(b.gpa, r) catch oom();
-                },
-                .toast => |toast| {
-                    b.offset += 1 + @sizeOf(Text.Toast);
-                    b.index += 1;
-                    std.debug.assert(b.index <= b.tuple().len());
-                    b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
-
-                    b.arr.append(b.gpa, 0x01) catch oom();
-                    b.arr.appendSlice(b.gpa, std.mem.asBytes(&toast)) catch oom();
-                },
-            }
-        }
-
-        /// Push a value of comptime-known type T.
-        pub fn push(b: *Builder, T: type, val: T) void {
-            if (@typeInfo(T) == .optional) {
-                if (val) |v|
-                    b.push(@typeInfo(T).optional.child, v)
-                else
-                    b.pushBytes(&.{});
-            } else {
-                const i = b.index;
-                std.debug.assert(i < b.tuple().len());
-                std.debug.assert(b.tuple().dbtype(i).checkType(T));
-
-                if (T == Text)
-                    b.pushText(val)
-                else
-                    b.pushBytes(std.mem.asBytes(&val));
-            }
+            const start = b.writer.writer.end;
+            text.write(&b.writer.writer) catch oom();
+            const end = b.writer.writer.end;
+            b.offset += @intCast(end - start);
+            b.index += 1;
+            std.debug.assert(b.index <= b.tuple().len());
+            b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
         }
 
         /// Push a value of runtime-known type.
@@ -410,46 +351,13 @@ pub const MemTuple = struct {
             }
             std.debug.assert(val.checkType(b.tuple().dbtype(i)));
 
-            switch (b.tuple().dbtype(i)) {
-                .boolean => b.pushBytes(std.mem.asBytes(&val.boolean)),
-                .text, .long_text => b.pushText(val.text),
-
-                .int1 => {
-                    const x: i8 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .int2 => {
-                    const x: i16 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .int4 => {
-                    const x: i32 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .int8 => {
-                    const x: i64 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-
-                .uint1 => {
-                    const x: u8 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .uint2 => {
-                    const x: u16 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .uint4, .oid => {
-                    const x: u32 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .uint8, .serial => {
-                    const x: u64 = @intCast(val.int);
-                    b.pushBytes(std.mem.asBytes(&x));
-                },
-                .uuid => b.pushBytes(std.mem.asBytes(&val.uuid)),
-                .nulltype => unreachable, // Should have put NULL there earlier
-            }
+            const start = b.writer.writer.end;
+            val.write(b.tuple().dbtype(i), &b.writer.writer) catch oom();
+            const end = b.writer.writer.end;
+            b.offset += @intCast(end - start);
+            b.index += 1;
+            std.debug.assert(b.index <= b.tuple().len());
+            b.tuple().offsetPtr(b.index).* = b.offset; // Update offset array
         }
 
         /// Adds extended fields to the tuple.
@@ -466,8 +374,8 @@ pub const MemTuple = struct {
             std.debug.assert(b.index == b.tuple().len());
             if (b.tuple().ptr.h.descr.has_extended)
                 std.debug.assert(b.extended);
-            const data = b.arr.toOwnedSlice(b.gpa) catch oom();
-            return .{ .ptr = @ptrCast(&data[0]) };
+            const data = b.writer.toOwnedSlice() catch oom();
+            return .{ .ptr = @ptrCast(@alignCast(data.ptr)) };
         }
     };
 };

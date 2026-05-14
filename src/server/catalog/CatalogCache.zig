@@ -190,7 +190,7 @@ pub fn Table(comptime id: tables.TableId) type {
             // Go through all the fields in the Row struct
             inline for (std.meta.fields(Row), 0..) |f, i| {
                 // Fill each one from the MemTuple
-                @field(result, f.name) = m.get(f.type, i);
+                @field(result, f.name) = m.getValue(i).to(f.type) catch unreachable;
             }
             return result;
         }
@@ -204,7 +204,8 @@ pub fn Table(comptime id: tables.TableId) type {
             // Go through all the fields in the Row struct
             inline for (std.meta.fields(Row)) |f| {
                 // Put each one into the MemTuple
-                builder.push(f.type, @field(row, f.name));
+                const val = common.Value.from(f.type, @field(row, f.name));
+                builder.pushValue(val);
             }
             builder.addExtended(.{
                 .xmin = new_tid,
@@ -245,8 +246,8 @@ pub fn Table(comptime id: tables.TableId) type {
                     const tuple = self.table.data.items[self.index];
                     // Check uint4 filters
                     for (self.keys, self.vals) |k, v| {
-                        const tuple_val = tuple.get(u32, k);
-                        if (tuple_val != v) {
+                        const tuple_val = tuple.getValue(k);
+                        if (tuple_val.int != v) {
                             // If it doesn't match, we should check the next tuple
                             self.index += 1;
                             continue :outer;
@@ -254,7 +255,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     }
                     // Check text filter
                     if (self.key_text) |key_text| {
-                        const tuple_text = tuple.get(common.Text, key_text).text();
+                        const tuple_text = tuple.getValue(key_text).text.text();
                         // Does the text match?
                         const match = if (self.ignore_case)
                             std.ascii.eqlIgnoreCase(tuple_text, self.val_text.?)

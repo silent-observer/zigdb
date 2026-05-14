@@ -73,9 +73,9 @@ pub fn build(str: []const u8, toast_table_id: ids.TableId, alloc: std.mem.Alloca
 
         // Construct the TOAST tuple
         var b = common.MemTuple.Builder.init(alloc, descr);
-        b.push(u64, toast_id);
-        b.push(u32, count);
-        b.push(Text, Text.makeRaw(chunk));
+        b.pushValue(.{ .int = @intCast(toast_id) });
+        b.pushValue(.{ .int = count });
+        b.pushValue(.{ .text = Text.makeRaw(chunk) });
         b.addExtended(.{
             .xmin = s.current_tid.real,
             .xmax = .invalid,
@@ -136,12 +136,12 @@ pub fn retrieve(text: Text, alloc: std.mem.Allocator, snapshot: *const transacti
             );
             while (try scan.next(alloc)) |tuple| {
                 // Skip chunks that aren't ours
-                if (tuple.get(u64, catalog.tables.index(.toast_id)) != toast.toast_id)
+                if (tuple.getValue(catalog.tables.index(.toast_id)).int != toast.toast_id)
                     continue;
                 // Get the sequence number and the data
-                const seq = tuple.get(u32, catalog.tables.index(.toast_seq));
-                const chunk = tuple.get(Text, catalog.tables.index(.toast_data)).raw;
-                const offset = @as(usize, seq) * max_chunk_size;
+                const seq = tuple.getValue(catalog.tables.index(.toast_seq)).int;
+                const chunk = tuple.getValue(catalog.tables.index(.toast_data)).text.raw;
+                const offset = @as(usize, @intCast(seq)) * max_chunk_size;
                 // Write the data to the correct place
                 @memcpy(data[offset .. offset + chunk.len], chunk);
                 defer tuple.deinit(alloc);
