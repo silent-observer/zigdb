@@ -76,7 +76,7 @@ fn advanceToNonEmpty(self: *HeapScanner) !bool {
         }
 
         // If the page has tuple, we found what we were looking for
-        if (self.parsed_page.?.offsets.len > 0) return true;
+        if (self.parsed_page.?.count() > 0) return true;
 
         // If not, advance to the next page
         self.page_id += 1;
@@ -93,7 +93,7 @@ fn advanceOne(self: *HeapScanner) !void {
 
     self.tuple_index += 1;
     // If we still have tuples on the current page, we're done
-    if (self.tuple_index < self.parsed_page.?.offsets.len)
+    if (self.tuple_index < self.parsed_page.?.count())
         return;
 
     // Advance to the next non-empty page if we have to

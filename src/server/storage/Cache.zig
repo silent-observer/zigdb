@@ -173,7 +173,8 @@ pub fn upgrade(
     try status.write_lock.lock(self.io);
 
     const prev_read_pins = status.read_pins.fetchSub(1, .acq_rel);
-    std.debug.assert(prev_read_pins < 0xFF);
+    std.debug.assert(prev_read_pins > 0);
+    pinned_page.writeable = true;
 }
 
 /// Get a read-only page.

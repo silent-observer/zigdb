@@ -53,7 +53,7 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
                 .db = s.db_id,
                 .table = stmt.table,
             },
-        ).addOneTuple(t);
+        ).addOneTuple(t, cxt.alloc);
         counter += 1;
     }
 
@@ -156,7 +156,7 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
         const new_tuple = b.finalize();
         // Insert it back into the table
         _ = try heap.Table.init(s.shared.storage_cache, table_id)
-            .addOneTuple(new_tuple);
+            .addOneTuple(new_tuple, cxt.alloc);
         counter += 1;
     }
 

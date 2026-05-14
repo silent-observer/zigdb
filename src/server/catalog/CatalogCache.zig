@@ -276,25 +276,6 @@ pub fn Table(comptime id: tables.TableId) type {
                 return null;
             }
 
-            /// Update the last Row returned by the Scanner
-            /// Note: you are not allowed to increase the size of the data in the row,
-            /// since the update is performed in place.
-            pub fn updateLast(self: *Scanner, cache: *storage.Cache, new: Row, tid: ids.RealTransactionId) !void {
-                // Convert the new row to a tuple
-                const tuple = rowToMemTuple(new, self.table.arena.allocator(), tid);
-                tuple.extended().pos = self.last_pos;
-
-                // Replace the tuple in the heap table
-                try heap.Table.init(cache, .{
-                    .db = self.table.db_id,
-                    .table = @intFromEnum(id),
-                }).updateInPlace(tuple);
-
-                // Replace the tuple in the cache
-                self.table.data.items[self.index - 1].deinit(self.table.arena.allocator());
-                self.table.data.items[self.index - 1] = tuple;
-            }
-
             /// Delete the last Row returned by the Scanner
             pub fn deleteLast(self: *Scanner, cache: *storage.Cache, tid: ids.RealTransactionId) !void {
                 // Delete the tuple in the heap table
@@ -441,7 +422,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     .db = self.db_id,
                     .table = @intFromEnum(id),
                 },
-            ).addOneTuple(tuple);
+            ).addOneTuple(tuple, self.arena.allocator());
             // Set the position we inserted this tuple into
             tuple.extended().pos = pos;
 

@@ -85,7 +85,7 @@ pub fn build(str: []const u8, toast_table_id: ids.TableId, alloc: std.mem.Alloca
         defer tuple.deinit(alloc);
 
         // Add it to the TOAST table
-        _ = try toast_table.addOneTuple(tuple);
+        _ = try toast_table.addOneTuple(tuple, alloc);
 
         offset += max_chunk_size;
         count += 1;

@@ -100,7 +100,8 @@ pub fn addPage(self: HeapTable) !storage.Cache.PinnedPage {
         .file = self.table_id.fullFileId(),
         .page = page_id,
     });
-    @memset(&new_page.page.d, 0);
+
+    HeapPage.writeInit(new_page.page);
 
     return new_page;
 }
@@ -129,12 +130,12 @@ pub fn getNextSerial(self: HeapTable) !u64 {
 }
 
 /// Add a new tuple to the HeapTable.
-pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !MemTuple.Pos {
+pub fn addOneTuple(self: HeapTable, tuple: MemTuple, alloc: std.mem.Allocator) !MemTuple.Pos {
     const header = try self.readHeader();
 
     // Go through pages to find a page that can fit this new tuple.
     // Create a new page if no pages have enough free space.
-    const raw_page: storage.Cache.PinnedPage = page_id: for (1..header.pages) |page_id| {
+    var raw_page: storage.Cache.PinnedPage = page_id: for (1..header.pages) |page_id| {
         // Read the page
         const raw_page = try self.cache.get(.{
             .file = self.table_id.fullFileId(),
@@ -150,12 +151,13 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple) !MemTuple.Pos {
             self.cache.unpin(raw_page);
     } else try self.addPage();
     defer self.cache.unpin(raw_page);
+    try self.cache.upgrade(&raw_page);
 
     // Write the tuple to the page
     const pos = block: {
         var page = HeapPage.parse(raw_page.page, raw_page.id.page);
 
-        const index = page.add(tuple);
+        const index = page.add(tuple, alloc);
         break :block MemTuple.Pos{
             .page_id = raw_page.id.page,
             .index = index,

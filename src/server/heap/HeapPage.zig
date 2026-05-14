@@ -48,6 +48,7 @@
 
 const std = @import("std");
 const Page = @import("../storage/RawDataFile.zig").Page;
+const SlottedPage = @import("../storage/SlottedPage.zig").SlottedPage;
 const common = @import("common");
 const MemTuple = common.MemTuple;
 const TupleDescriptor = common.TupleDescriptor;
@@ -56,35 +57,19 @@ const ids = common.ids;
 
 const HeapPage = @This();
 
-const PageHeader = extern struct {
-    count: u16,
-};
+slotted: SlottedPage(void),
 
-page: *Page.Data,
-
-/// Contains `count` offsets for `count` tuples.
-offsets: []u16,
-page_id: Page.Id,
+pub fn writeInit(page: *Page.Data) void {
+    SlottedPage(void).writeInit(page, {});
+}
 
 /// Parse a HeapPage from a raw Page.
 pub fn parse(page: *Page.Data, page_id: Page.Id) HeapPage {
-    const h: [*]PageHeader = @ptrCast(&page.d);
-    const offsets_ptr: [*]u16 = @ptrCast(&h[1]);
-    const offsets = offsets_ptr[0..h[0].count];
-
-    return .{
-        .page = page,
-        .offsets = offsets,
-        .page_id = page_id,
-    };
+    return .{ .slotted = .parse(page, page_id) };
 }
 
 pub fn count(self: *const HeapPage) usize {
-    return self.offsets.len;
-}
-
-fn header(self: *const HeapPage) *PageHeader {
-    return @ptrCast(&self.page.d);
+    return self.slotted.count();
 }
 
 /// Representation of a on-disk tuple
@@ -218,11 +203,6 @@ const HeapTuple = struct {
     }
 };
 
-/// Get pointer to raw data of i-th tuple on the page.
-fn getHeapTuple(self: *const HeapPage, i: u16) HeapTuple {
-    return .{ .ptr = @ptrCast(&self.page.d[self.offsets[i]]) };
-}
-
 /// Read i-th tuple from HeapPage into a MemTuple.
 /// The MemTuple is allocated with a given Allocator.
 /// The TupleDescriptor must also be supplied.
@@ -232,78 +212,37 @@ pub fn read(
     descr: *const TupleDescriptor,
     alloc: std.mem.Allocator,
 ) MemTuple {
-    const tuple = self.getHeapTuple(i);
+    const raw = self.slotted.get(i);
+    const tuple = HeapTuple{ .ptr = @ptrCast(raw.ptr) };
     return tuple.read(descr, alloc, .{
-        .page_id = self.page_id,
+        .page_id = self.slotted.page_id,
         .index = i,
     });
 }
 
-/// Check if i-th tuple on HeapPage can be updated with a new MemTuple.
-/// This can be done if the new data fits into the space currently taken
-/// by old data.
-pub fn canUpdateInPlace(
-    self: *const HeapPage,
-    i: u16,
-    new: MemTuple,
-) bool {
-    const tuple = self.getHeapTuple(i);
-    return HeapTuple.expectedSize(new) <= tuple.heapSize();
-}
-
 /// Check if a new MemTuple would fit on this HeapPage.
 pub fn fits(self: *const HeapPage, tuple: MemTuple) bool {
-    // Offset of a last tuple on the page
-    const last_offset = if (self.offsets.len == 0)
-        Page.Size
-    else
-        self.offsets[self.offsets.len - 1];
-
-    const header_size = @sizeOf(PageHeader) + self.offsets.len * @sizeOf(u16);
-    return header_size + @sizeOf(u16) <= last_offset - HeapTuple.expectedSize(tuple);
+    return self.slotted.fits(HeapTuple.expectedSize(tuple));
 }
 
 /// Put a new MemTuple on this HeapPage. The offset is placed at the end of
 /// the offset array.
 /// pos extended field in MemTuple is ignored.
 /// Returns the index of the added tuple.
-pub fn add(self: *HeapPage, tuple: MemTuple) u16 {
-    std.debug.assert(self.fits(tuple));
+pub fn add(self: *HeapPage, tuple: MemTuple, alloc: std.mem.Allocator) u16 {
     std.debug.assert(tuple.ptr.h.descr.has_extended);
 
-    // Offset of a last tuple on the page
-    const last_offset = if (self.offsets.len == 0)
-        Page.Size
-    else
-        self.offsets[self.offsets.len - 1];
-    // The offset of the new tuple is *less* than the last one, and
-    // the space between them must fit the heap tuple.
-    const new_offset = last_offset - HeapTuple.expectedSize(tuple);
+    const buf = alloc.alloc(u8, HeapTuple.expectedSize(tuple)) catch oom();
+    defer alloc.free(buf);
 
-    HeapTuple.write(tuple, self.page.d[new_offset..last_offset]);
-    self.offsets.len += 1;
-    self.offsets[self.offsets.len - 1] = @intCast(new_offset);
-    self.header().count += 1;
-    return @intCast(self.offsets.len - 1);
-}
-
-/// Update the i-th tuple on HeapPage with a new MemTuple.
-/// This can be done if the new data fits into the space currently taken
-/// by old data, which can be checked with canUpdateInPlace.
-pub fn updateInPlace(self: *HeapPage, i: u16, new: MemTuple) void {
-    std.debug.assert(self.canUpdateInPlace(i, new));
-    std.debug.assert(new.ptr.h.descr.has_extended);
-    const tuple = self.getHeapTuple(i);
-    const raw: [*]u8 = @ptrCast(tuple.ptr);
-    // The space currently occupied by the tuple.
-    const dest = raw[0..tuple.heapSize()];
-    @memset(dest, 0);
-    HeapTuple.write(new, dest);
+    HeapTuple.write(tuple, buf);
+    return self.slotted.add(buf);
 }
 
 /// Deletes the i-th tuple on HeapPage.
 /// This updates tuple's xmax to tid.
 pub fn deleteTupleAt(self: *HeapPage, i: u16, tid: ids.RealTransactionId) void {
-    const tuple = self.getHeapTuple(i);
+    const raw = self.slotted.get(i);
+    const tuple = HeapTuple{ .ptr = @ptrCast(raw.ptr) };
     tuple.ptr.h.xmax = tid;
 }
