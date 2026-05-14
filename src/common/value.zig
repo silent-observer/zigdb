@@ -23,6 +23,10 @@ pub const Text = union(enum) {
         toast_id: u64, // Id of the toasted value
     };
 
+    pub const ParsingError = error{
+        InvalidTextFormat,
+    };
+
     /// Parse Text value from raw bytes
     pub fn fromBytes(bytes: []const u8) Text {
         return switch (bytes[0]) {
@@ -53,6 +57,43 @@ pub const Text = union(enum) {
         switch (self) {
             .raw => |r| return r.len,
             .toast => unreachable,
+        }
+    }
+
+    fn read(
+        r: *std.Io.Reader,
+        alloc: std.mem.Allocator,
+    ) !Text {
+        const size = try r.takeLeb128(i32);
+        if (size >= 0) {
+            return makeRaw(r.readAlloc(alloc, @intCast(size)) catch oom());
+        } else if (size == -1) {
+            const toast_table_id = try r.takeInt(ids.TableId, .little);
+            const real_size = try r.takeInt(u32, .little);
+            const toast_id = try r.takeInt(u64, .little);
+            return .{ .toast = .{
+                .toast_table_id = toast_table_id,
+                .size = real_size,
+                .toast_id = toast_id,
+            } };
+        } else return ParsingError.InvalidTextFormat;
+    }
+
+    fn write(
+        self: *const Text,
+        w: *std.Io.Writer,
+    ) !void {
+        switch (self.*) {
+            .raw => |r| {
+                try w.writeSleb128(@as(i32, @intCast(r.len)));
+                try w.writeAll(r);
+            },
+            .toast => |toast| {
+                try w.writeSleb128(-1);
+                try w.writeInt(ids.TableId, toast.toast_table_id, .little);
+                try w.writeInt(u32, toast.size, .little);
+                try w.writeInt(u64, toast.toast_id, .little);
+            },
         }
     }
 };
@@ -140,6 +181,49 @@ pub const Value = union(enum) {
             .boolean => return 1,
             .uuid => return 36,
             .null => return 0,
+        }
+    }
+
+    pub fn read(
+        r: *std.Io.Reader,
+        dbtype: t.DBType,
+        alloc: std.mem.Allocator,
+    ) !Value {
+        switch (dbtype) {
+            .uint1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
+            .uint2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
+            .uint4, .serial => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
+            .uint8, .oid => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
+            .int1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
+            .int2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
+            .int4 => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
+            .int8 => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
+            .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
+            .boolean => return .{ .boolean = try r.takeByte() != 0 },
+            .nulltype => return .null,
+            .text, .long_text => return .{ .text = try Text.read(r, alloc) },
+        }
+    }
+
+    pub fn write(
+        self: Value,
+        dbtype: t.DBType,
+        w: *std.Io.Writer,
+    ) !void {
+        if (self == .null) return;
+        switch (dbtype) {
+            .uint1 => try w.writeInt(u8, @intCast(self.int), .little),
+            .uint2 => try w.writeInt(u16, @intCast(self.int), .little),
+            .uint4, .serial => try w.writeInt(u32, @intCast(self.int), .little),
+            .uint8, .oid => try w.writeInt(u64, @intCast(self.int), .little),
+            .int1 => try w.writeInt(i8, @intCast(self.int), .little),
+            .int2 => try w.writeInt(i16, @intCast(self.int), .little),
+            .int4 => try w.writeInt(i32, @intCast(self.int), .little),
+            .int8 => try w.writeInt(i64, @intCast(self.int), .little),
+            .uuid => try w.writeInt(uuid.Uuid, self.uuid, .little),
+            .boolean => try w.writeByte(@intFromBool(self.boolean)),
+            .nulltype => unreachable,
+            .text, .long_text => try self.text.write(w),
         }
     }
 };

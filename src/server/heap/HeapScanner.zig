@@ -7,7 +7,7 @@ const Page = RawDataFile.Page;
 const storage = @import("../storage.zig");
 const transaction = @import("../transaction.zig");
 const HeapTable = @import("HeapTable.zig");
-const HeapPage = @import("HeapPage.zig");
+const heap_tuple = @import("heap_tuple.zig");
 const common = @import("common");
 const MemTuple = common.MemTuple;
 const TupleDescriptor = common.TupleDescriptor;
@@ -22,7 +22,7 @@ page_id: ids.PageId, // Current page id
 tuple_index: u16, // Current tuple index on the page
 page_count: u32, // Total number of pages
 page: ?storage.Cache.PinnedPage, // Current page the scanner is reading
-parsed_page: ?HeapPage, // Current page in its parsed state
+parsed_page: ?HeapTable.HeapPage, // Current page in its parsed state
 cache: *storage.Cache,
 snapshot: *const transaction.Snapshot,
 
@@ -72,7 +72,7 @@ fn advanceToNonEmpty(self: *HeapScanner) !bool {
                 .file = self.table_id.fullFileId(),
                 .page = self.page_id,
             });
-            self.parsed_page = HeapPage.parse(self.page.?.page, self.page_id);
+            self.parsed_page = HeapTable.HeapPage.parse(self.page.?.page, self.page_id);
         }
 
         // If the page has tuple, we found what we were looking for
@@ -119,10 +119,16 @@ pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?MemTuple {
             return null;
 
         // Read the tuple from the page
-        const result = self.parsed_page.?.read(
-            self.tuple_index,
+        const raw = self.parsed_page.?.get(self.tuple_index);
+        var reader = std.Io.Reader.fixed(raw);
+        const result = try heap_tuple.read(
+            &reader,
             self.descr,
             tuple_alloc,
+            .{
+                .page_id = self.page_id,
+                .index = self.tuple_index,
+            },
         );
 
         // Advance to the next tuple

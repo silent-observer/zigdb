@@ -8,12 +8,14 @@ const std = @import("std");
 
 const storage = @import("../storage.zig");
 const Page = storage.Page;
-const HeapPage = @import("HeapPage.zig");
 const common = @import("common");
 const MemTuple = common.MemTuple;
+const heap_tuple = @import("heap_tuple.zig");
 const ids = common.ids;
 
 const HeapTable = @This();
+
+pub const HeapPage = storage.SlottedPage(void);
 
 cache: *storage.Cache,
 table_id: ids.FullTableId,
@@ -101,7 +103,7 @@ pub fn addPage(self: HeapTable) !storage.Cache.PinnedPage {
         .page = page_id,
     });
 
-    HeapPage.writeInit(new_page.page);
+    HeapPage.writeInit(new_page.page, {});
 
     return new_page;
 }
@@ -133,6 +135,11 @@ pub fn getNextSerial(self: HeapTable) !u64 {
 pub fn addOneTuple(self: HeapTable, tuple: MemTuple, alloc: std.mem.Allocator) !MemTuple.Pos {
     const header = try self.readHeader();
 
+    var writer = std.Io.Writer.Allocating.init(alloc);
+    defer writer.deinit();
+    heap_tuple.write(&writer.writer, tuple) catch common.oom();
+    const data = writer.written();
+
     // Go through pages to find a page that can fit this new tuple.
     // Create a new page if no pages have enough free space.
     var raw_page: storage.Cache.PinnedPage = page_id: for (1..header.pages) |page_id| {
@@ -145,7 +152,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, alloc: std.mem.Allocator) !
 
         // Check if the tuple would fit
         const page = HeapPage.parse(raw_page.page, @intCast(page_id));
-        if (page.fits(tuple))
+        if (page.fits(data.len))
             break :page_id raw_page
         else
             self.cache.unpin(raw_page);
@@ -157,7 +164,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, alloc: std.mem.Allocator) !
     const pos = block: {
         var page = HeapPage.parse(raw_page.page, raw_page.id.page);
 
-        const index = page.add(tuple, alloc);
+        const index = page.add(data);
         break :block MemTuple.Pos{
             .page_id = raw_page.id.page,
             .index = index,
@@ -196,5 +203,12 @@ pub fn deleteTupleAt(self: HeapTable, pos: MemTuple.Pos, tid: ids.RealTransactio
     defer self.cache.unpin(raw_page);
     var page = HeapPage.parse(raw_page.page, pos.page_id);
 
-    page.deleteTupleAt(pos.index, tid);
+    const data = page.get(pos.index);
+    var reader = std.Io.Reader.fixed(data);
+    var ext = try heap_tuple.readExtended(&reader);
+
+    ext.xmax = tid;
+
+    var writer = std.Io.Writer.fixed(data);
+    try heap_tuple.writeExtended(&writer, ext);
 }
