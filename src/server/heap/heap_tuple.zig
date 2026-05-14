@@ -1,3 +1,18 @@
+//! Operations on a tuple stored in the heap table.
+//! The page itself is fixed size (see RawDataFile.zig), however it
+//! can contain variable number of heap tuples.
+//!
+//! Each heap tuple has the following structure:
+//! - Header (8 bytes)
+//!    - xmin (4 bytes) - ID of transaction that inserted this tuple
+//!    - xmax (4 bytes) - ID of transaction that deleted this tuple
+//! - NULL bitmask (ceil(N/8) bytes) - bitmask describing NULL fields in the tuple
+//! - Data section (??? bytes)
+//!
+//! NULL bitmask contains 1 byte for each 8 attributes (so usually just 1-2 bytes),
+//! and each bit corresponds to an attribute. It is set if the value is NULL.
+//! The data section contains the serialized not NULL attributes one after another.
+
 const std = @import("std");
 const common = @import("common");
 const MemTuple = common.MemTuple;

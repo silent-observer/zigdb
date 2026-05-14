@@ -1,50 +1,37 @@
-//! Represents a page of a heap table.
+//! Represents a special slotted page, used in various types of files.
 //! The page itself is fixed size (see RawDataFile.zig), however it
-//! can contain variable number of heap tuples.
+//! can contain variable number of items.
 //!
-//! The page starts with a fixed-size header, currently only containing
-//! `count` - the number of tuples on the page.
-//! After that `count` offsets follow (each 2 bytes). Each offset points
-//! at the start of a tuple, counting from the start of the page.
-//! The actual tuples are allocated starting from the *end* of the page,
-//! so the space between offset array and the tuples is always free.
+//! The page starts with a fixed-size header, containing
+//! `count` - the number of items on the page, `used` - the number of used bytes,
+//! and custom ExtraHeader.
+//! After that `count` pointers follow (each 4 bytes). Each pointer contains
+//! an offset and a size (each 2 bytes). THe offset points at the start of
+//! an item, counting from the start of the page.
+//! The actual item are allocated starting from the *end* of the page,
+//! so the space between offset array and the item is always free.
 //!
 //! To summarize, the page has the following structure:
-//! - Header (2 bytes)
+//! - Header (4+Extra bytes)
 //!   - count (2 bytes) - number of tuples on the page
-//! - Offsets (2*count bytes)
-//!   - offsets[0] (2 bytes)
-//!   - offsets[1] (2 bytes)
+//!   - used (2 bytes) - how many bytes on the page are already used
+//!   - extra (Extra bytes) - any given extra header data
+//! - Pointers (4*count bytes)
+//!   - pointers[0] (4 bytes)
+//!   - pointers[1] (4 bytes)
 //!   - ...
-//!   - offsets[count-1] (2 bytes)
+//!   - pointers[count-1] (4 bytes)
 //! - *empty space*
-//! - Tuples (??? bytes)
-//!   - Tuple count-1
+//! - Items (??? bytes)
+//!   - Item count-1
 //!   - ...
-//!   - Tuple 1
-//!   - Tuple 0
+//!   - Item 1
+//!   - Item 0
 //!
 //! Note: it is intentional that a page filled with zeros is a valid
-//! heap page containing no tuples.
+//! heap page containing no items.
 //!
-//! Each heap tuple has a structure similar to MemTuple (see data/tuple.zig).
-//! The main difference is that the header contains 2-byte atribute count instead
-//! of pointer to tuple descriptor. The structure is the following:
-//! - Header (12 bytes)
-//!    - count (2 bytes) - number of attributes
-//!    - padding (2 bytes)
-//!    - xmin (4 bytes) - ID of transaction that inserted this tuple
-//!    - xmax (4 bytes) - ID of transaction that deleted this tuple
-//! - Array of offsets (2 * count + 2 bytes)
-//!    - offsets[0] (2 bytes)
-//!    - offsets[1] (2 bytes)
-//!    - offsets[2] (2 bytes)
-//!    - ...
-//!    - offset[count-1] (2 bytes)
-//!    - offset[count] (2 bytes)
-//! - Data section (offset[count] bytes)
-//!
-//! The actual HeapPage struct is a representation of a parsed Page.
+//! The actual SlottedPage struct is a representation of a parsed Page.
 
 const std = @import("std");
 const Page = @import("RawDataFile.zig").Page;
