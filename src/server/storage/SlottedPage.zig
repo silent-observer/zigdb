@@ -65,7 +65,7 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
 
         pub const Header = extern struct {
             count: u16,
-            free: u16,
+            used: u16,
             extra: ExtraHeader align(4),
         };
 
@@ -73,14 +73,6 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
             offset: u16,
             size: u16,
         };
-
-        pub fn writeInit(page: *Page.Data, extra: ExtraHeader) void {
-            @memset(&page.d, 0);
-            const h: *Header = @ptrCast(&page.d);
-            h.count = 0;
-            h.extra = extra;
-            h.free = Page.Size - @sizeOf(Header);
-        }
 
         /// Parse a SlottedPage from a raw Page.
         pub fn parse(page: *Page.Data, page_id: Page.Id) Self {
@@ -111,7 +103,8 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
 
         /// Check if a new item would fit on this SlottedPage.
         pub fn fits(self: *const Self, new_len: usize) bool {
-            return new_len <= self.header().free;
+            const free = Page.Size - @sizeOf(Header) - self.header().used;
+            return new_len <= free;
         }
 
         /// Put a new item on this SlottedPage. The pointer is placed at the end of
@@ -136,7 +129,7 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
                 .size = @intCast(data.len),
             };
             self.header().count += 1;
-            self.header().free -= @intCast(data.len + @sizeOf(ItemPointer));
+            self.header().used += @intCast(data.len + @sizeOf(ItemPointer));
             return @intCast(self.pointers.len - 1);
         }
     };

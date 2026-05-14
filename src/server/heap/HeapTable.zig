@@ -102,8 +102,7 @@ pub fn addPage(self: HeapTable) !storage.Cache.PinnedPage {
         .file = self.table_id.fullFileId(),
         .page = page_id,
     });
-
-    HeapPage.writeInit(new_page.page, {});
+    @memset(&new_page.page.d, 0);
 
     return new_page;
 }

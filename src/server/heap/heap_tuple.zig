@@ -5,12 +5,6 @@ const TupleDescriptor = common.TupleDescriptor;
 const oom = common.oom;
 const ids = common.ids;
 
-const Header = extern struct {
-    count: u16, // Number of attributes
-    xmin: ids.RealTransactionId, // ID of transaction that inserted this tuple
-    xmax: ids.RealTransactionId, // ID of transaction that deleted this tuple
-};
-
 /// Deserialize a MemTuple from HeapTuple.
 /// The MemTuple is allocated with a given Allocator.
 /// The TupleDescriptor must also be supplied.
