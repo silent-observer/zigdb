@@ -15,10 +15,9 @@ def parse_schedule(schedule: str):
             tests.append(name.strip())
     return tests
 
-async def start_client(port: int) -> asyncio.subprocess.Process:
+async def start_client() -> asyncio.subprocess.Process:
     client = await asyncio.subprocess.create_subprocess_exec(
             "zig-out/bin/client",
-            "-p", str(port),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE
         )
@@ -48,11 +47,8 @@ async def run_test(test: str) -> str:
             pass
         os.makedirs('/tmp/datadir')
 
-        port = random.randint(17300, 17400)
-
         server = await asyncio.subprocess.create_subprocess_exec(
             "zig-out/bin/server",
-            "-p", str(port),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL
         )
@@ -60,7 +56,7 @@ async def run_test(test: str) -> str:
         await asyncio.sleep(0.5)
 
         clients = dict()
-        clients[0] = await start_client(port)
+        clients[0] = await start_client()
 
         try:
             for line in input_file:
@@ -79,7 +75,7 @@ async def run_test(test: str) -> str:
                 if match:
                     client_id = int(match.group(1))
                     if client_id not in clients:
-                        clients[client_id] = await start_client(port)
+                        clients[client_id] = await start_client()
                     
                     if match.group(2) == '&':
                         background = True

@@ -52,7 +52,7 @@ pub fn main(init: std.process.Init) !void {
         "0.0.0.0",
         port,
     );
-    var tcp_server = try listen_addr.listen(init.io, .{});
+    var tcp_server = try listen_addr.listen(init.io, .{ .reuse_address = true });
     defer tcp_server.deinit(init.io);
 
     // Create the temporary data directory (for testing)
