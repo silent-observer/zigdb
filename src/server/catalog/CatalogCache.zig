@@ -188,31 +188,36 @@ pub fn Table(comptime id: tables.TableId) type {
         fn memTupleToRow(m: MemTuple) Row {
             var result: Row = undefined;
             // Go through all the fields in the Row struct
-            inline for (std.meta.fields(Row), 0..) |f, i| {
+            inline for (std.meta.fields(Row), m.values) |f, v| {
                 // Fill each one from the MemTuple
-                @field(result, f.name) = m.getValue(i).to(f.type) catch unreachable;
+                @field(result, f.name) = v.to(f.type) catch unreachable;
             }
             return result;
         }
 
         /// Convert static custom-built Row to a dynamic MemTuple
         fn rowToMemTuple(row: Row, alloc: std.mem.Allocator, new_tid: ids.RealTransactionId) MemTuple {
-            var builder = MemTuple.Builder.init(
-                alloc,
-                tables.descriptor(id),
-            );
+            const descr = tables.descriptor(id);
+            var values = std.ArrayList(common.Value)
+                .initCapacity(alloc, descr.len()) catch oom();
             // Go through all the fields in the Row struct
             inline for (std.meta.fields(Row)) |f| {
                 // Put each one into the MemTuple
                 const val = common.Value.from(f.type, @field(row, f.name));
-                builder.pushValue(val);
+                values.appendAssumeCapacity(val);
             }
-            builder.addExtended(.{
+
+            const ext = alloc.create(MemTuple.ExtendedFields) catch oom();
+            ext.* = .{
                 .xmin = new_tid,
                 .xmax = .invalid,
                 .pos = .none,
-            });
-            return builder.finalize();
+            };
+            return .{
+                .descr = descr,
+                .ext = ext,
+                .values = values.toOwnedSliceAssert(),
+            };
         }
 
         /// Scanner for a catalog table.
@@ -246,7 +251,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     const tuple = self.table.data.items[self.index];
                     // Check uint4 filters
                     for (self.keys, self.vals) |k, v| {
-                        const tuple_val = tuple.getValue(k);
+                        const tuple_val = tuple.values[k];
                         if (tuple_val.int != v) {
                             // If it doesn't match, we should check the next tuple
                             self.index += 1;
@@ -255,7 +260,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     }
                     // Check text filter
                     if (self.key_text) |key_text| {
-                        const tuple_text = tuple.getValue(key_text).text.text();
+                        const tuple_text = tuple.values[key_text].text.text();
                         // Does the text match?
                         const match = if (self.ignore_case)
                             std.ascii.eqlIgnoreCase(tuple_text, self.val_text.?)
@@ -270,7 +275,7 @@ pub fn Table(comptime id: tables.TableId) type {
                     }
                     // Everything matched, return this tuple
                     self.index += 1;
-                    self.last_pos = tuple.extended().pos;
+                    self.last_pos = tuple.ext.?.pos;
                     return memTupleToRow(tuple);
                 }
                 // Reached the end of the table
@@ -289,7 +294,9 @@ pub fn Table(comptime id: tables.TableId) type {
                 self.index -= 1;
                 // Delete the tuple in the cache
                 const tuple = self.table.data.orderedRemove(self.index);
-                tuple.deinit(self.table.arena.allocator());
+                const alloc = self.table.arena.allocator();
+                alloc.free(tuple.values);
+                alloc.destroy(tuple.ext.?);
             }
         };
 
@@ -425,7 +432,7 @@ pub fn Table(comptime id: tables.TableId) type {
                 },
             ).addOneTuple(tuple, self.arena.allocator());
             // Set the position we inserted this tuple into
-            tuple.extended().pos = pos;
+            tuple.ext.?.pos = pos;
 
             // Add the row to the cache too
             self.data.append(self.arena.allocator(), tuple) catch oom();

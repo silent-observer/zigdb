@@ -15,7 +15,7 @@ const catalog = @import("../catalog.zig");
 pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Context) !common.Value {
     switch (scalar.action) {
         .column => |i| {
-            const v = tuple.getValue(i);
+            const v = tuple.values[i];
             switch (v) {
                 // Text values might have been toasted, we should retrieve their raw representation
                 .text => |t| return .{

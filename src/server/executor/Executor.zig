@@ -60,7 +60,9 @@ fn executeSelect(
     // Fetch tuples one by one
     while (try execDataNode(stmt.root, cxt)) |tuple| {
         // And send them to the client
-        try s.sender.send(.{ .tuple = tuple });
+        const m = common.network.Message.makeTuple(tuple, cxt.alloc);
+        defer cxt.alloc.free(m.tuple.data);
+        try s.sender.send(m);
     }
 
     // No success message

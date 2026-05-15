@@ -72,17 +72,21 @@ pub fn build(str: []const u8, toast_table_id: ids.TableId, alloc: std.mem.Alloca
         const chunk = str[offset .. offset + chunk_size];
 
         // Construct the TOAST tuple
-        var b = common.MemTuple.Builder.init(alloc, descr);
-        b.pushValue(.{ .int = @intCast(toast_id) });
-        b.pushValue(.{ .int = count });
-        b.pushValue(.{ .text = Text.makeRaw(chunk) });
-        b.addExtended(.{
+        var ext = common.MemTuple.ExtendedFields{
             .xmin = s.current_tid.real,
             .xmax = .invalid,
             .pos = undefined,
-        });
-        const tuple = b.finalize();
-        defer tuple.deinit(alloc);
+        };
+        var values = [3]common.Value{
+            .{ .int = @intCast(toast_id) },
+            .{ .int = count },
+            .{ .text = Text.makeRaw(chunk) },
+        };
+        const tuple = common.MemTuple{
+            .descr = descr,
+            .ext = &ext,
+            .values = &values,
+        };
 
         // Add it to the TOAST table
         _ = try toast_table.addOneTuple(tuple, alloc);
@@ -136,11 +140,11 @@ pub fn retrieve(text: Text, alloc: std.mem.Allocator, snapshot: *const transacti
             );
             while (try scan.next(alloc)) |tuple| {
                 // Skip chunks that aren't ours
-                if (tuple.getValue(catalog.tables.index(.toast_id)).int != toast.toast_id)
+                if (tuple.values[catalog.tables.index(.toast_id)].int != toast.toast_id)
                     continue;
                 // Get the sequence number and the data
-                const seq = tuple.getValue(catalog.tables.index(.toast_seq)).int;
-                const chunk = tuple.getValue(catalog.tables.index(.toast_data)).text.raw;
+                const seq = tuple.values[catalog.tables.index(.toast_seq)].int;
+                const chunk = tuple.values[catalog.tables.index(.toast_data)].text.raw;
                 const offset = @as(usize, @intCast(seq)) * max_chunk_size;
                 // Write the data to the correct place
                 @memcpy(data[offset .. offset + chunk.len], chunk);

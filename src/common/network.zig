@@ -20,8 +20,13 @@
 //! Also, the client can send "exit" message instead of a query to close the connection.
 
 const std = @import("std");
-const t = @import("types.zig");
-const MemTuple = @import("tuple.zig").MemTuple;
+const types = @import("types.zig");
+const DBType = types.DBType;
+const TupleDescriptor = types.TupleDescriptor;
+const AttributeDescriptor = types.AttributeDescriptor;
+const tuple = @import("tuple.zig");
+const MemTuple = tuple.MemTuple;
+const CompactTuple = tuple.CompactTuple;
 const oom = @import("utils.zig").oom;
 
 /// Default port for the server
@@ -59,8 +64,8 @@ pub const Message = union(Tag) {
     err: void,
     incomplete: void,
     ready: void,
-    tuple_descriptor: *const t.TupleDescriptor,
-    tuple: MemTuple,
+    tuple_descriptor: *const TupleDescriptor,
+    tuple: NetworkTuple,
     exit: void,
 
     pub const Tag = enum(u8) {
@@ -75,13 +80,37 @@ pub const Message = union(Tag) {
         exit = 'X',
     };
 
+    const NetworkTuple = CompactTuple(void);
+    pub fn makeTuple(t: MemTuple, alloc: std.mem.Allocator) Message {
+        return Message{
+            .tuple = NetworkTuple.compact(
+                .{
+                    .header = {},
+                    .values = t.values,
+                },
+                t.descr,
+                alloc,
+            ),
+        };
+    }
+
+    pub fn unmakeTuple(m: Message, descr: *const TupleDescriptor, alloc: std.mem.Allocator) !MemTuple {
+        std.debug.assert(m == .tuple);
+        const data = try m.tuple.uncompact(descr, alloc);
+        return .{
+            .descr = descr,
+            .ext = null,
+            .values = data.values,
+        };
+    }
+
     /// Calculate the size of data for the message
     fn calcSize(m: Message) usize {
         return switch (m) {
             .log => |l| l.len,
             .query => |q| q.len,
             .success => |s| s.len,
-            .tuple => |tuple| tuple.size() - @sizeOf(MemTuple.Header),
+            .tuple => |t| t.data.len,
             .tuple_descriptor => |td| size: {
                 var total_size: usize = @sizeOf(u8) + @sizeOf(u16);
                 for (td.attrs.items) |att| {
@@ -102,10 +131,7 @@ pub const Message = union(Tag) {
             .log => |l| try w.writeAll(l),
             .query => |l| try w.writeAll(l),
             .success => |l| try w.writeAll(l),
-            .tuple => |tup| {
-                const ptr: [*]u8 = @ptrCast(&tup.ptr.tail);
-                try w.writeAll(ptr[0..size]);
-            },
+            .tuple => |tup| try w.writeAll(tup.data),
             .tuple_descriptor => |td| {
                 try w.writeByte(@intFromBool(td.has_extended));
                 try w.writeInt(u16, @intCast(td.len()), .little);
@@ -136,30 +162,27 @@ pub const Message = union(Tag) {
             .success => return .{
                 .success = try r.readAlloc(alloc, size),
             },
-            .tuple => {
-                const tuple = MemTuple.allocUnitialized(alloc, size + @sizeOf(MemTuple.Header));
-                const byte_ptr: [*]u8 = @ptrCast(&tuple.ptr.tail);
-                try r.readSliceAll(byte_ptr[0..size]);
-                // WARNING: TupleDescriptor is left uninitialized!
-                tuple.ptr.h.descr = undefined;
-                return .{ .tuple = tuple };
+            .tuple => return .{
+                .tuple = .{
+                    .data = try r.readAlloc(alloc, size),
+                },
             },
             .tuple_descriptor => {
                 const has_extended = try r.takeByte() > 0;
                 const attrs_len = try r.takeInt(u16, .little);
-                var attrs = std.ArrayList(t.AttributeDescriptor)
+                var attrs = std.ArrayList(AttributeDescriptor)
                     .initCapacity(alloc, attrs_len) catch oom();
                 for (0..attrs_len) |_| {
-                    const dbtype: t.DBType = @enumFromInt(try r.takeInt(u32, .little));
+                    const dbtype: DBType = @enumFromInt(try r.takeInt(u32, .little));
                     const name_len = try r.takeByte();
                     const name = try r.readAlloc(alloc, name_len);
-                    attrs.appendAssumeCapacity(t.AttributeDescriptor{
+                    attrs.appendAssumeCapacity(AttributeDescriptor{
                         .t = dbtype,
                         .name = name,
                         .table_name = "",
                     });
                 }
-                const descr = alloc.create(t.TupleDescriptor) catch oom();
+                const descr = alloc.create(TupleDescriptor) catch oom();
                 descr.* = .{
                     .has_extended = has_extended,
                     .attrs = attrs,

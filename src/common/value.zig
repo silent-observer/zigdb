@@ -83,6 +83,20 @@ pub const Text = union(enum) {
             },
         }
     }
+
+    pub fn clone(self: Text, alloc: std.mem.Allocator) Text {
+        switch (self) {
+            .raw => |r| return makeRaw(alloc.dupe(u8, r) catch oom()),
+            .toast => return self,
+        }
+    }
+
+    pub fn deinit(self: Text, alloc: std.mem.Allocator) void {
+        switch (self) {
+            .raw => |r| alloc.free(r),
+            .toast => {},
+        }
+    }
 };
 
 /// Value of runtime-known type.
@@ -235,6 +249,20 @@ pub const Value = union(enum) {
             .boolean => try w.writeByte(@intFromBool(self.boolean)),
             .nulltype => unreachable,
             .text, .long_text => try self.text.write(w),
+        }
+    }
+
+    pub fn clone(self: Value, alloc: std.mem.Allocator) Value {
+        switch (self) {
+            .int, .boolean, .null, .uuid => return self,
+            .text => |text| return .{ .text = text.clone(alloc) },
+        }
+    }
+
+    pub fn deinit(self: Value, alloc: std.mem.Allocator) void {
+        switch (self) {
+            .int, .boolean, .null, .uuid => {},
+            .text => |text| text.deinit(alloc),
         }
     }
 };

@@ -134,10 +134,11 @@ fn handleMessage(self: *Client, m: common.network.Message) !bool {
             self.table.descr = td.clone(self.table.arena.allocator());
         },
         // Received a new tuple
-        .tuple => |tuple| {
-            // We have to initialize the tuple descriptor!
-            tuple.ptr.h.descr = &self.table.descr.?;
-            self.table.append(tuple.clone(self.table.arena.allocator()));
+        .tuple => {
+            self.table.append(try m.unmakeTuple(
+                &self.table.descr.?,
+                self.table.arena.allocator(),
+            ));
         },
         .query, .exit => unreachable,
     }

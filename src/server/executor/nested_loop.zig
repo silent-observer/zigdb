@@ -91,31 +91,26 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
                         // Already found legitimate matches, no need for NULL tuple
                         continue;
                     // Fill the right tuple with nulls
-                    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
+                    var values = std.ArrayList(common.Value)
+                        .initCapacity(cxt.alloc, plan.descr.len()) catch oom();
+
+                    const rhs_len = plan.action.nested_loop.rhs.descr.len();
                     switch (plan.action.nested_loop.output_format) {
                         .left_right => {
-                            for (0..left_tuple.len()) |i| {
-                                b.pushValue(left_tuple.getValue(i));
-                            }
-                            for (0..plan.action.nested_loop.rhs.descr.len()) |_| {
-                                b.pushValue(.null);
-                            }
-                            if (plan.descr.has_extended)
-                                b.addExtended(left_tuple.extended().*);
+                            values.appendSliceAssumeCapacity(left_tuple.values);
+                            values.appendNTimesAssumeCapacity(.null, rhs_len);
                         },
                         .right_left => {
-                            for (0..plan.action.nested_loop.rhs.descr.len()) |_| {
-                                b.pushValue(.null);
-                            }
-                            for (0..left_tuple.len()) |i| {
-                                b.pushValue(left_tuple.getValue(i));
-                            }
-                            if (plan.descr.has_extended)
-                                b.addExtended(left_tuple.extended().*);
+                            values.appendNTimesAssumeCapacity(.null, rhs_len);
+                            values.appendSliceAssumeCapacity(left_tuple.values);
                         },
                         .left_only => unreachable,
                     }
-                    return b.finalize();
+                    return common.MemTuple{
+                        .descr = plan.descr,
+                        .ext = left_tuple.ext,
+                        .values = values.toOwnedSliceAssert(),
+                    };
                 },
                 .cross, .inner, .semi => continue,
             }
@@ -123,27 +118,28 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
 
         const cond_tuple = tuple: {
             // We are ready to build combined tuple
-            var b = common.MemTuple.Builder.init(cxt.alloc, plan.action.nested_loop.cond_descr);
+            const cond_descr = plan.action.nested_loop.cond_descr;
+            var values = std.ArrayList(common.Value)
+                .initCapacity(cxt.alloc, cond_descr.len()) catch oom();
             switch (plan.action.nested_loop.cond_format) {
                 .left_right => {
-                    for (0..state.left_tuple.?.len()) |i| {
-                        b.pushValue(state.left_tuple.?.getValue(i));
-                    }
-                    for (0..right_tuple.?.len()) |i| {
-                        b.pushValue(right_tuple.?.getValue(i));
-                    }
+                    values.appendSliceAssumeCapacity(state.left_tuple.?.values);
+                    values.appendSliceAssumeCapacity(right_tuple.?.values);
                 },
                 .right_left => {
-                    for (0..right_tuple.?.len()) |i| {
-                        b.pushValue(right_tuple.?.getValue(i));
-                    }
-                    for (0..state.left_tuple.?.len()) |i| {
-                        b.pushValue(state.left_tuple.?.getValue(i));
-                    }
+                    values.appendSliceAssumeCapacity(right_tuple.?.values);
+                    values.appendSliceAssumeCapacity(state.left_tuple.?.values);
                 },
                 .left_only => unreachable,
             }
-            break :tuple b.finalize();
+            break :tuple common.MemTuple{
+                .descr = cond_descr,
+                .values = values.toOwnedSlice(cxt.alloc) catch oom(),
+                .ext = if (state.left_tuple.?.ext) |e|
+                    e
+                else
+                    right_tuple.?.ext,
+            };
         };
 
         // Check the condition
@@ -159,32 +155,28 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
         };
 
         if (cond_val) {
-            const result_tuple = switch (plan.action.nested_loop.output_format) {
-                .left_right => tuple: {
-                    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
-                    for (0..state.left_tuple.?.len()) |i| {
-                        b.pushValue(state.left_tuple.?.getValue(i));
-                    }
-                    for (0..right_tuple.?.len()) |i| {
-                        b.pushValue(right_tuple.?.getValue(i));
-                    }
-                    if (plan.descr.has_extended)
-                        b.addExtended(state.left_tuple.?.extended().*);
-                    break :tuple b.finalize();
+            var values = std.ArrayList(common.Value)
+                .initCapacity(cxt.alloc, plan.descr.len()) catch oom();
+            switch (plan.action.nested_loop.output_format) {
+                .left_right => {
+                    values.appendSliceAssumeCapacity(state.left_tuple.?.values);
+                    values.appendSliceAssumeCapacity(right_tuple.?.values);
                 },
-                .left_only => state.left_tuple.?,
-                .right_left => tuple: {
-                    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
-                    for (0..right_tuple.?.len()) |i| {
-                        b.pushValue(right_tuple.?.getValue(i));
-                    }
-                    for (0..state.left_tuple.?.len()) |i| {
-                        b.pushValue(state.left_tuple.?.getValue(i));
-                    }
-                    if (plan.descr.has_extended)
-                        b.addExtended(right_tuple.?.extended().*);
-                    break :tuple b.finalize();
+                .right_left => {
+                    values.appendSliceAssumeCapacity(right_tuple.?.values);
+                    values.appendSliceAssumeCapacity(state.left_tuple.?.values);
                 },
+                .left_only => {
+                    values.appendSliceAssumeCapacity(state.left_tuple.?.values);
+                },
+            }
+            const result_tuple = common.MemTuple{
+                .descr = plan.descr,
+                .ext = if (state.left_tuple.?.ext) |e|
+                    e
+                else
+                    right_tuple.?.ext,
+                .values = values.toOwnedSliceAssert(),
             };
 
             state.found_match = true;

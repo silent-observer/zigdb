@@ -44,40 +44,41 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     if (input == null) return null;
 
     // Build our new tuple
-    var b = common.MemTuple.Builder.init(cxt.alloc, plan.descr);
+    var values = std.ArrayList(common.Value)
+        .initCapacity(cxt.alloc, plan.descr.len()) catch oom();
     switch (plan.action.project.op) {
         .evaluate => {
             // Go through our expressions
             for (plan.action.project.exprs) |expr| {
                 // Evaluate each one and add the result to the output tuple
                 const v = try scalar.eval(&expr, input.?, cxt);
-                b.pushValue(v);
+                values.appendAssumeCapacity(v);
             }
         },
         .copy => {
             // Special case: simply copy data from input
-            for (0..input.?.len()) |i| {
-                b.pushValue(input.?.getValue(i));
-            }
+            values.appendSliceAssumeCapacity(input.?.values);
         },
         .prepend_nulls => {
             // Special case: fill input with nulls
-            for (0..plan.descr.len() - input.?.len()) |_| {
-                b.pushValue(.null);
-            }
-            for (0..input.?.len()) |i| {
-                b.pushValue(input.?.getValue(i));
-            }
+            values.appendNTimesAssumeCapacity(.null, plan.descr.len() - input.?.len());
+            values.appendSliceAssumeCapacity(input.?.values);
         },
     }
 
-    if (plan.descr.has_extended) {
+    const ext = if (plan.descr.has_extended) ext: {
+        const ext = cxt.alloc.create(common.MemTuple.ExtendedFields) catch oom();
         std.debug.assert(s.current_tid == .real);
-        b.addExtended(.{
+        ext.* = .{
             .xmin = s.current_tid.real,
             .xmax = .invalid,
             .pos = .none,
-        });
-    }
-    return b.finalize();
+        };
+        break :ext ext;
+    } else null;
+    return common.MemTuple{
+        .descr = plan.descr,
+        .ext = ext,
+        .values = values.toOwnedSliceAssert(),
+    };
 }

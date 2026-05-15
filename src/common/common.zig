@@ -5,6 +5,7 @@ pub const TupleDescriptor = types.TupleDescriptor;
 
 pub const tuple = @import("tuple.zig");
 pub const MemTuple = tuple.MemTuple;
+pub const CompactTuple = tuple.CompactTuple;
 
 pub const value = @import("value.zig");
 pub const Value = value.Value;

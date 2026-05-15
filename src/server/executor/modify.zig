@@ -37,15 +37,11 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
     var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
         // Toast attributes if needed
-        const t = if (stmt.toast_table) |toast_table_id| t: {
-            var b = common.MemTuple.Builder.init(cxt.alloc, tuple.ptr.h.descr);
-            for (0..tuple.len()) |i| {
-                const value = tuple.getValue(i);
-                b.pushValue(try toaster.toastValue(value, toast_table_id, cxt.alloc));
+        if (stmt.toast_table) |toast_table_id| {
+            for (tuple.values) |*v| {
+                v.* = try toaster.toastValue(v.*, toast_table_id, cxt.alloc);
             }
-            b.addExtended(tuple.extended().*);
-            break :t b.finalize();
-        } else tuple;
+        }
         // And insert them into the output table
         _ = try heap.Table.init(
             s.shared.storage_cache,
@@ -53,7 +49,7 @@ pub fn executeInsert(stmt: Plan.Statement.Insert, cxt: *Context) ![]const u8 {
                 .db = s.db_id,
                 .table = stmt.table,
             },
-        ).addOneTuple(t, cxt.alloc);
+        ).addOneTuple(tuple, cxt.alloc);
         counter += 1;
     }
 
@@ -89,7 +85,7 @@ pub fn executeDelete(stmt: Plan.Statement.Delete, cxt: *Context) ![]const u8 {
                 .db = s.db_id,
                 .table = stmt.table,
             },
-        ).deleteTupleAt(tuple.extended().pos, s.current_tid.real);
+        ).deleteTupleAt(tuple.ext.?.pos, s.current_tid.real);
         counter += 1;
     }
 
@@ -115,13 +111,6 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
     // Don't forget to deinitialize it at the end
     defer Executor.deinitDataNode(stmt.root, cxt);
 
-    // Temporary tuple for updates
-    const temp_tuple = cxt.alloc.alloc(
-        common.Value,
-        stmt.root.descr.len(),
-    ) catch oom();
-    defer cxt.alloc.free(temp_tuple);
-
     // Fetch input tuples one by one
     var counter: usize = 0;
     while (try Executor.execDataNode(stmt.root, cxt)) |tuple| {
@@ -131,32 +120,14 @@ pub fn executeUpdate(stmt: Plan.Statement.Update, cxt: *Context) ![]const u8 {
         };
         // Delete them from the table
         try heap.Table.init(s.shared.storage_cache, table_id)
-            .deleteTupleAt(tuple.extended().pos, s.current_tid.real);
-        // Fill the temporary tuple with them
-        for (0..tuple.len()) |i| {
-            temp_tuple[i] = tuple.getValue(i);
-        }
+            .deleteTupleAt(tuple.ext.?.pos, s.current_tid.real);
         // Run the updates
         for (stmt.cols, stmt.vals) |col, val| {
-            temp_tuple[col] = try scalar.eval(&val, tuple, cxt);
+            tuple.values[col] = try scalar.eval(&val, tuple, cxt);
         }
-        // Build the new tuple
-        var b = common.MemTuple.Builder.init(cxt.alloc, stmt.root.descr);
-        for (temp_tuple) |v| {
-            if (stmt.toast_table) |toast_table_id|
-                b.pushValue(try toaster.toastValue(v, toast_table_id, cxt.alloc))
-            else
-                b.pushValue(v);
-        }
-        b.addExtended(.{
-            .xmin = s.current_tid.real,
-            .xmax = .invalid,
-            .pos = .none,
-        });
-        const new_tuple = b.finalize();
         // Insert it back into the table
         _ = try heap.Table.init(s.shared.storage_cache, table_id)
-            .addOneTuple(new_tuple, cxt.alloc);
+            .addOneTuple(tuple, cxt.alloc);
         counter += 1;
     }
 

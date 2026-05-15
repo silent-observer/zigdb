@@ -7,7 +7,7 @@ const Page = RawDataFile.Page;
 const storage = @import("../storage.zig");
 const transaction = @import("../transaction.zig");
 const HeapTable = @import("HeapTable.zig");
-const heap_tuple = @import("heap_tuple.zig");
+const HeapTuple = HeapTable.HeapTuple;
 const common = @import("common");
 const MemTuple = common.MemTuple;
 const TupleDescriptor = common.TupleDescriptor;
@@ -103,8 +103,7 @@ fn advanceOne(self: *HeapScanner) !void {
 }
 
 /// Check if the tuple is actually visible in this snapshot
-fn tupleVisible(self: *HeapScanner, tuple: MemTuple) !bool {
-    const ext = tuple.extended();
+fn tupleVisible(self: *HeapScanner, ext: MemTuple.ExtendedFields) !bool {
     const creation_visible = try self.snapshot.changesVisible(ext.xmin);
     const deletion_visible = try self.snapshot.changesVisible(ext.xmax);
     // The tuple is visible if we can see it was created, but we can't see it was deleted.
@@ -119,22 +118,36 @@ pub fn next(self: *HeapScanner, tuple_alloc: std.mem.Allocator) !?MemTuple {
             return null;
 
         // Read the tuple from the page
-        const raw = self.parsed_page.?.get(self.tuple_index);
-        var reader = std.Io.Reader.fixed(raw);
-        const result = try heap_tuple.read(
-            &reader,
-            self.descr,
-            tuple_alloc,
-            .{
-                .page_id = self.page_id,
+        const tuple = HeapTuple{
+            .data = self.parsed_page.?.get(self.tuple_index),
+        };
+        const header = tuple.getHeader();
+        const ext: MemTuple.ExtendedFields = .{
+            .xmin = header.xmin,
+            .xmax = header.xmax,
+            .pos = .{
                 .index = self.tuple_index,
+                .page_id = self.page_id,
             },
-        );
+        };
 
+        if (!try self.tupleVisible(ext)) {
+            try self.advanceOne();
+            continue;
+        }
+
+        const ext_ptr = tuple_alloc.create(MemTuple.ExtendedFields) catch oom();
+        ext_ptr.* = ext;
+
+        const data = try tuple.uncompact(self.descr, tuple_alloc);
+        const result = MemTuple{
+            .descr = self.descr,
+            .ext = ext_ptr,
+            .values = data.values,
+        };
         // Advance to the next tuple
         try self.advanceOne();
-        if (try self.tupleVisible(result))
-            return result;
+        return result;
     }
 }
 

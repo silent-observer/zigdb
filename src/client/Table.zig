@@ -48,8 +48,8 @@ pub fn format(
 
     // Go through all the tuples
     for (self.tuples.items) |t| {
-        for (0..self.descr.?.len()) |i| {
-            const width = t.getValue(i).calcTextWidth();
+        for (t.values, 0..) |v, i| {
+            const width = v.calcTextWidth();
             // Calculate the maximum width of each column
             max_widths.items[i] = @intCast(@max(max_widths.items[i], width));
         }
@@ -79,7 +79,7 @@ pub fn format(
         for (max_widths.items, 0..) |w, i| {
             if (i > 0)
                 try writer.writeByte('|');
-            const v = t.getValue(i);
+            const v = t.values[i];
             const width = v.calcTextWidth();
 
             const total_pad = w - width;

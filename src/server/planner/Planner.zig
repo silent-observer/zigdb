@@ -500,11 +500,15 @@ fn planValues(
     // Go through all the rows in the query
     for (ds.u.values.data) |row| {
         // Build the tuple
-        var b = common.MemTuple.Builder.init(p.alloc, ds.t.?);
-        for (row) |expr| {
-            b.pushValue(expr.u.value);
+        const values = p.alloc.alloc(common.Value, row.len) catch oom();
+        for (row, values) |expr, *v| {
+            v.* = expr.u.value;
         }
-        values_data.appendAssumeCapacity(b.finalize());
+        values_data.appendAssumeCapacity(.{
+            .descr = ds.t.?,
+            .ext = null,
+            .values = values,
+        });
     }
 
     // Build the data source node

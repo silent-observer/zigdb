@@ -199,9 +199,12 @@ pub fn execSetReturningFunction(
             if (result <= s.end) {
                 s.current += s.step;
 
-                var b: common.MemTuple.Builder = .init(alloc, s.descr);
-                b.pushValue(.{ .int = result });
-                return b.finalize();
+                return common.MemTuple.make(
+                    s.descr,
+                    null,
+                    &.{.{ .int = result }},
+                    alloc,
+                );
             } else return null;
         },
     }
