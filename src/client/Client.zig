@@ -30,6 +30,7 @@ table: Table,
 
 pub const Config = struct {
     prompt: bool = true,
+    host: []const u8 = "127.0.0.1",
     port: u16 = common.network.default_port,
 };
 

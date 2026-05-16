@@ -31,7 +31,10 @@ fn handleConnection(
     var server = zigdb.Server.init(io, gpa, client_stream);
     defer server.deinit();
     server.loop() catch |e| {
-        std.debug.print("Disconnected: {}\n", .{e});
+        if (e == error.EndOfStream)
+            std.debug.print("Disconnected\n", .{})
+        else
+            std.debug.print("Disconnected with error: {}\n", .{e});
     };
 }
 

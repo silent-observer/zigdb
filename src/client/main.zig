@@ -15,18 +15,23 @@ pub fn main(init: std.process.Init) !void {
             const port = args.next().?;
             config.port = try std.fmt.parseInt(u16, port, 10);
         }
+        if (std.mem.eql(u8, arg, "-h")) {
+            const host = args.next().?;
+            config.host = init.arena.allocator().dupe(u8, host) catch unreachable;
+        }
     }
 
     // Initialize the server address
-    const server_addr = try std.Io.net.IpAddress.parse(
-        "127.0.0.1",
-        config.port,
-    );
+    const server_host = try std.Io.net.HostName.init(config.host);
     // Start the connection
-    const stream = try server_addr.connect(init.io, .{
-        .mode = .stream,
-        .protocol = .tcp,
-    });
+    const stream = try server_host.connect(
+        init.io,
+        config.port,
+        .{
+            .mode = .stream,
+            .protocol = .tcp,
+        },
+    );
     defer stream.close(init.io);
 
     // Initialize the client
