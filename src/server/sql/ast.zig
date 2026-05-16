@@ -18,6 +18,8 @@ pub const Statement = union(enum) {
     begin: void,
     commit: void,
     rollback: void,
+    show_tables: void,
+    show_table: Name,
     err: void,
 
     pub const Select = struct {

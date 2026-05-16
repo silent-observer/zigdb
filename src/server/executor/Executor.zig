@@ -40,6 +40,8 @@ pub fn execute(
         .begin => try executeBegin(),
         .commit => try executeCommit(),
         .rollback => try executeRollback(),
+        .show_tables => try executeShowTables(cxt),
+        .show_table => try executeShowTable(stmt.show_table, cxt),
     };
 }
 
@@ -125,6 +127,73 @@ fn executeRollback() ![]const u8 {
     try s.shared.lock_manager.unlockAll(s.thread_id);
 
     return "ROLLBACK";
+}
+
+/// Execute a SHOW TABLES statement
+fn executeShowTables(cxt: *Context) ![]const u8 {
+    const s = Session.get();
+
+    var descr = common.TupleDescriptor.empty;
+    descr.attrs.append(cxt.alloc, .{
+        .name = "tables",
+        .t = .text,
+    }) catch oom();
+
+    try s.sender.send(.{ .tuple_descriptor = &descr });
+
+    var scan = s.catalog_cache.catalog.zdb_rels.scan(&.{}, &.{});
+    while (scan.next()) |row| {
+        var vals = [1]common.Value{.{ .text = row.rel_name }};
+        const tuple = common.MemTuple{
+            .descr = &descr,
+            .values = &vals,
+            .ext = null,
+        };
+        const m = common.network.Message.makeTuple(tuple, cxt.alloc);
+        defer cxt.alloc.free(m.tuple.data);
+        try s.sender.send(m);
+    }
+
+    // No success message
+    return "";
+}
+
+/// Execute a SHOW TABLES statement
+fn executeShowTable(table_id: common.ids.TableId, cxt: *Context) ![]const u8 {
+    const s = Session.get();
+
+    var rel_scan = s.catalog_cache.catalog.zdb_rels.scan(
+        &.{.rel_id},
+        &.{table_id},
+    );
+    const row = rel_scan.next().?;
+    std.debug.assert(rel_scan.next() == null);
+
+    const descr = s.catalog_cache.descr.getPtr(table_id).?;
+
+    var w = std.Io.Writer.Allocating.init(cxt.alloc);
+    try w.writer.print(
+        "Table \"{s}\" (id={})\n",
+        .{ row.rel_name.text(), table_id },
+    );
+
+    if (row.rel_toast_id) |toast_id| {
+        try w.writer.print(
+            "Toast table id = {}\n",
+            .{toast_id},
+        );
+    }
+
+    if (descr.attrs.items.len == 0) {
+        try w.writer.print("No columns\n", .{});
+    } else {
+        try w.writer.print("Columns ({}):\n", .{descr.attrs.items.len});
+        for (descr.attrs.items) |attr| {
+            try w.writer.print("    {s} {f}\n", .{ attr.name, attr.t });
+        }
+    }
+
+    return w.toOwnedSlice() catch oom();
 }
 
 /// Initialize any DataNode. Call this at the start of execution.

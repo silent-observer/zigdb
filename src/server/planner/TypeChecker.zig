@@ -60,7 +60,8 @@ pub fn check(t: *TypeChecker, stmt: *ast.Statement) bool {
         .insert_values => return t.checkInsertValues(&stmt.insert_values),
         .update => return t.checkUpdate(&stmt.update),
         .truncate => return t.checkTruncate(&stmt.truncate),
-        .begin, .commit, .rollback => return true,
+        .show_table => return t.checkShowTable(&stmt.show_table),
+        .begin, .commit, .rollback, .show_tables => return true,
         .err => unreachable,
     }
 }
@@ -134,6 +135,12 @@ fn checkDropTable(t: *TypeChecker, stmt: *ast.Statement.DropTable) bool {
 /// Check TRUNCATE statement
 fn checkTruncate(t: *TypeChecker, stmt: *ast.Statement.Truncate) bool {
     _ = t.findTable(&stmt.name) catch return false;
+    return true;
+}
+
+/// Check SHOW TABLE statement
+fn checkShowTable(t: *TypeChecker, name: *ast.Name) bool {
+    _ = t.findTable(name) catch return false;
     return true;
 }
 

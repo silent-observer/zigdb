@@ -22,6 +22,8 @@ pub const Statement = union(enum) {
     begin: void,
     commit: void,
     rollback: void,
+    show_table: ids.TableId,
+    show_tables: void,
 
     pub const Select = struct {
         /// Source of the data

@@ -179,6 +179,7 @@ pub fn parse(p: *Parser) ast.Statement {
 ///           | Begin
 ///           | Commit
 ///           | Rollback
+///           | Show
 /// ```
 fn parseStmt(p: *Parser) ast.Statement {
     const t = p.peek();
@@ -193,6 +194,7 @@ fn parseStmt(p: *Parser) ast.Statement {
         .begin => return p.parseBegin(),
         .commit => return p.parseCommit(),
         .rollback => return p.parseRollback(),
+        .show => return p.parseShow(),
         else => {},
     };
 
@@ -626,6 +628,37 @@ fn parseRollback(p: *Parser) ast.Statement {
     p.expectKeyword(.rollback) catch return .err;
     p.expectSymbol(.semi) catch return .err;
     return .rollback;
+}
+
+/// Parse a SHOW statement.
+/// ```
+/// Show = "SHOW" "TABLES" ";"
+///      | "SHOW" "TABLE" Name ";"
+/// ```
+fn parseShow(p: *Parser) ast.Statement {
+    p.expectKeyword(.show) catch return .err;
+    const t = p.peek();
+    if (t.keyword()) |kw| switch (kw) {
+        .table => {
+            p.advance();
+            const name = p.parseName() catch return .err;
+            p.expectSymbol(.semi) catch return .err;
+            return .{ .show_table = name };
+        },
+        .tables => {
+            p.advance();
+            p.expectSymbol(.semi) catch return .err;
+            return .show_tables;
+        },
+        else => {},
+    };
+
+    p.addError(
+        t,
+        "Expected TABLE or TABLES but got \"{s}\"",
+        .{t.text(p.input)},
+    );
+    return .err;
 }
 
 /// Parse a type name.

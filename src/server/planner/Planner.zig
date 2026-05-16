@@ -52,6 +52,8 @@ pub fn plan(p: *Planner, stmt: ast.Statement) *Plan.Statement {
         .begin => return p.make(@as(Plan.Statement, .begin)),
         .commit => return p.make(@as(Plan.Statement, .commit)),
         .rollback => return p.make(@as(Plan.Statement, .rollback)),
+        .show_table => return p.planShowTable(stmt.show_table),
+        .show_tables => return p.make(@as(Plan.Statement, .show_tables)),
         .err => unreachable,
     }
 }
@@ -121,6 +123,12 @@ fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) *Plan.Statement {
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
     } });
+}
+
+/// Plan SHOW TABLE statement
+fn planShowTable(p: *Planner, name: ast.Name) *Plan.Statement {
+    const table = p.findTable(name);
+    return p.make(Plan.Statement{ .show_table = table.rel_id });
 }
 
 /// Plan INSERT VALUES statement

@@ -113,13 +113,37 @@ pub const DBType = enum(u32) {
             .nulltype => unreachable,
         };
     }
+
+    /// Format the tuple descriptor as [name: text, i: int4]
+    pub fn format(
+        self: DBType,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .oid => try writer.writeAll("OID"),
+            .uint1 => try writer.writeAll("UINT1"),
+            .uint2 => try writer.writeAll("UINT2"),
+            .uint4 => try writer.writeAll("UINT4"),
+            .uint8 => try writer.writeAll("UINT8"),
+            .serial => try writer.writeAll("SERIAL"),
+            .int1 => try writer.writeAll("INT1"),
+            .int2 => try writer.writeAll("INT2"),
+            .int4 => try writer.writeAll("INT4"),
+            .int8 => try writer.writeAll("INT8"),
+            .boolean => try writer.writeAll("BOOLEAN"),
+            .long_text => try writer.writeAll("LONG TEXT"),
+            .text => try writer.writeAll("TEXT"),
+            .uuid => try writer.writeAll("UUID"),
+            .nulltype => try writer.writeAll("NULL"),
+        }
+    }
 };
 
 /// A descriptor of an attribute (or table column).
 pub const AttributeDescriptor = struct {
     t: DBType,
     name: []const u8,
-    table_name: []const u8,
+    table_name: []const u8 = "",
 };
 
 /// A descriptor of a tuple (or table).
