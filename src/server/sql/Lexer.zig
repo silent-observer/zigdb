@@ -100,7 +100,7 @@ pub const Token = struct {
         slash,
 
         pub fn text(s: Symbol) []const u8 {
-            return SymbolReverseMap.get(s);
+            return symbol_reverse_map.get(s);
         }
     };
 
@@ -111,11 +111,28 @@ pub const Token = struct {
         num: void,
         str: void,
         eof: void,
+
+        pub fn format(
+            self: Kind,
+            writer: *std.Io.Writer,
+        ) std.Io.Writer.Error!void {
+            switch (self) {
+                .keyword => |kw| try writer.writeAll(@tagName(kw)),
+                .symbol => |s| try writer.writeAll(s.text()),
+                .id => try writer.writeAll("an identifier"),
+                .num => try writer.writeAll("a number"),
+                .str => try writer.writeAll("a string literal"),
+                .eof => try writer.writeAll("end of input"),
+            }
+        }
     };
 
     /// Get the text corresponding to the token
     pub fn text(t: Token, input: []const u8) []const u8 {
-        return input[t.start..t.end];
+        if (t.kind == .eof)
+            return "end of input"
+        else
+            return input[t.start..t.end];
     }
 
     /// Check if the token matches expected token kind
@@ -134,7 +151,7 @@ pub const Token = struct {
 
 /// Comptime-generated string map for all keywords.
 /// Lookups ignore case, making it an efficient way to check if a string is a keyword.
-const KeywordMap = std.StaticStringMapWithEql(
+const keyword_map = std.StaticStringMapWithEql(
     Token.Keyword,
     std.static_string_map.eqlAsciiIgnoreCase,
 ).initComptime(block: {
@@ -152,7 +169,7 @@ const KeywordMap = std.StaticStringMapWithEql(
 
 /// Comptime-generated string map for all symbols.
 /// This is an efficient way to find a symbol enum from text.
-const SymbolMap = std.StaticStringMap(Token.Symbol).initComptime(.{
+const symbol_map = std.StaticStringMap(Token.Symbol).initComptime(.{
     .{ "(", Token.Symbol.lparen },
     .{ ")", Token.Symbol.rparen },
     .{ ";", Token.Symbol.semi },
@@ -172,9 +189,9 @@ const SymbolMap = std.StaticStringMap(Token.Symbol).initComptime(.{
 
 /// Comptime generated reverse string map for all the symbols.
 /// Attaches a text to each symbol.
-const SymbolReverseMap: std.EnumArray(Token.Symbol, []const u8) = block: {
+const symbol_reverse_map: std.EnumArray(Token.Symbol, []const u8) = block: {
     var result: std.EnumArray(Token.Symbol, []const u8) = .initUndefined();
-    for (SymbolMap.keys(), SymbolMap.values()) |k, v| {
+    for (symbol_map.keys(), symbol_map.values()) |k, v| {
         result.set(v, k);
     }
     break :block result;
@@ -209,7 +226,7 @@ fn lexWord(self: *Lexer) Token {
     const text = self.input[start..end];
 
     // Check if it's a keyword
-    if (KeywordMap.get(text)) |kw| {
+    if (keyword_map.get(text)) |kw| {
         return .{
             .kind = .{ .keyword = kw },
             .start = @intCast(start),
@@ -324,7 +341,7 @@ pub fn lex(self: *Lexer) ?Error {
         else if (std.ascii.isDigit(c))
             // Lex a number if the first character is [0-9]
             self.tokens.append(self.alloc, self.lexNum()) catch oom()
-        else if (SymbolMap.getLongestPrefix(self.input[self.pos..])) |kv| {
+        else if (symbol_map.getLongestPrefix(self.input[self.pos..])) |kv| {
             // If we found this to be a symbol, lex a symbol
             // The longest possible symbol gets matched since getLongestPrefix is used.
             self.tokens.append(self.alloc, .{

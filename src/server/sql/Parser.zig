@@ -117,7 +117,7 @@ fn expect(p: *Parser, kind: Lexer.Token.Kind) InternalError!void {
     if (!p.eat(kind)) {
         p.addError(
             p.peek(),
-            "Expected {} but got \"{s}\"",
+            "Expected {f} but got \"{s}\"",
             .{ kind, p.peek().text(p.input) },
         );
 

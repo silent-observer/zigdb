@@ -485,6 +485,18 @@ const TypeRequest = union(enum) {
             .any => return true,
         }
     }
+
+    pub fn format(
+        self: TypeRequest,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .db => |dbtype| try dbtype.format(writer),
+            .any_int => try writer.writeAll("an integer"),
+            .any_text => try writer.writeAll("a string"),
+            .any => try writer.writeAll("any type"),
+        }
+    }
 };
 
 /// Infer the expression type, given context and a type request
@@ -516,20 +528,20 @@ fn checkExprType(
                 // We are expected to provide a specific type, check if we can
                 switch (v) {
                     .int => if (!request.db.isNumber()) {
-                        t.addError("Expected {} but got integer constant", .{request});
+                        t.addError("Expected {f} but got integer constant", .{request});
                         return Error.TypeError;
                     },
                     .text => if (request.db != .text and request.db != .long_text) {
-                        t.addError("Expected {} but got text constant", .{request});
+                        t.addError("Expected {f} but got text constant", .{request});
                         return Error.TypeError;
                     },
                     .boolean => if (request.db != .boolean) {
-                        t.addError("Expected {} but got boolean constant", .{request});
+                        t.addError("Expected {f} but got boolean constant", .{request});
                         return Error.TypeError;
                     },
                     .null => {},
                     .uuid => if (request.db != .uuid) {
-                        t.addError("Expected {} but got uuid constant", .{request});
+                        t.addError("Expected {f} but got uuid constant", .{request});
                         return Error.TypeError;
                     },
                 }
@@ -553,7 +565,7 @@ fn checkExprType(
                     const dbtype = try t.checkExprType(u.expr, request, cxt);
                     // And check the validity afterwards
                     if (!dbtype.isNumber()) {
-                        t.addError("Cannot use arithmetic operator on type {}", .{dbtype});
+                        t.addError("Cannot use arithmetic operator on type {f}", .{dbtype});
                     }
                     break :expr_type dbtype;
                 },
@@ -571,11 +583,11 @@ fn checkExprType(
                     const rhs = try t.checkExprType(u.right, request, cxt);
                     // And check the validity afterwards
                     if (!request.fulfilled(lhs)) {
-                        t.addError("Cannot use arithmetic operator on type {}", .{lhs});
+                        t.addError("Cannot use arithmetic operator on type {f}", .{lhs});
                         return Error.TypeError;
                     }
                     if (!request.fulfilled(rhs)) {
-                        t.addError("Cannot use arithmetic operator on type {}", .{rhs});
+                        t.addError("Cannot use arithmetic operator on type {f}", .{rhs});
                         return Error.TypeError;
                     }
                     break :expr_type lhs.maxIntType(rhs);
@@ -591,7 +603,7 @@ fn checkExprType(
                     const both_numbers = lhs.isNumber() and rhs.isNumber();
                     const same_type = std.meta.eql(lhs, rhs);
                     if (!both_numbers and !same_type) {
-                        t.addError("Cannot compare types {} and {}", .{ lhs, rhs });
+                        t.addError("Cannot compare types {f} and {f}", .{ lhs, rhs });
                         return Error.TypeError;
                     } else break :expr_type .boolean;
                 },
@@ -643,7 +655,7 @@ fn checkExprType(
     };
     // We got some type, is it actually what was requested?
     if (!request.fulfilled(expr_type)) {
-        t.addError("Expected {} but got type {}", .{ request, expr_type });
+        t.addError("Expected {f} but got type {f}", .{ request, expr_type });
         return Error.TypeError;
     }
     if (request == .db)
