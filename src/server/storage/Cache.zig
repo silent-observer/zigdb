@@ -51,6 +51,8 @@ page_pool: std.heap.MemoryPool(RawDataFile.Page.Data),
 pages: std.array_hash_map.Auto(ids.FullPageId, *RawDataFile.Page.Data),
 // Hash map of page statuses
 page_status: std.array_hash_map.Auto(ids.FullPageId, PageStatus),
+// Flag to mock storage cache without writing anything to actual filesystem
+mock_fs: bool = false,
 
 /// Initialize the page cache
 pub fn init(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
@@ -66,11 +68,19 @@ pub fn init(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
     };
 }
 
+/// Initialize the page cache
+pub fn initMock(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
+    var c = init(gpa, io, base_path);
+    c.mock_fs = true;
+    return c;
+}
+
 /// Deinitialize all the page cache.
 /// Note that data is *not* flushed, so changes might be lost.
 pub fn deinit(self: *Cache) void {
     for (self.files.values()) |f| {
-        f.close();
+        if (!self.mock_fs)
+            f.close();
     }
     self.page_pool.deinit(self.gpa);
     self.files.deinit(self.gpa);
@@ -96,7 +106,8 @@ fn fetch(
     errdefer _ = self.files.swapRemove(id.file);
     if (!file.found_existing) {
         // Open the file if it isn't open already
-        file.value_ptr.* = try RawDataFile.open(self.io, self.base_path, id.file);
+        if (!self.mock_fs)
+            file.value_ptr.* = try RawDataFile.open(self.io, self.base_path, id.file);
     }
     // This is the file in question
     const rdf = file.value_ptr.*;
@@ -134,7 +145,10 @@ fn fetch(
     if (!page.found_existing) {
         page.value_ptr.* = self.page_pool.create(self.gpa) catch oom();
         // Read the page data if it wasn't in the cache
-        try rdf.read(id.page, page.value_ptr.*);
+        if (!self.mock_fs)
+            try rdf.read(id.page, page.value_ptr.*)
+        else
+            @memset(&page.value_ptr.*.d, 0);
     }
 
     // Form the PinnedPage to return
@@ -195,6 +209,7 @@ pub fn getWriteable(
 
 /// Flush all dirty pages in the cache to disk.
 pub fn flush(self: *Cache, force: bool) !void {
+    if (self.mock_fs) return;
     // All of this has to be mutexed since hash maps are not thread-safe
     try self.mutex.lock(self.io);
     defer self.mutex.unlock(self.io);
