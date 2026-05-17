@@ -46,13 +46,14 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
         const Self = @This();
 
         page: *Page.Data,
+        header: *Header,
         /// Contains `count` offsets for `count` tuples.
         pointers: []ItemPointer,
         page_id: Page.Id,
 
         pub const Header = extern struct {
             count: u16,
-            used: u16,
+            used_by_data: u16,
             extra: ExtraHeader align(4),
         };
 
@@ -69,6 +70,7 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
 
             return .{
                 .page = page,
+                .header = @ptrCast(&page.d),
                 .pointers = pointers,
                 .page_id = page_id,
             };
@@ -78,46 +80,54 @@ pub fn SlottedPage(comptime ExtraHeader: type) type {
             return self.pointers.len;
         }
 
-        pub fn header(self: *const Self) *Header {
-            return @ptrCast(&self.page.d);
-        }
-
         /// Get raw data of i-th item on the page.
-        pub fn get(self: *const Self, i: u16) []u8 {
+        pub fn get(self: *const Self, i: usize) []u8 {
             const ptr = self.pointers[i];
             return self.page.d[ptr.offset .. ptr.offset + ptr.size];
         }
 
         /// Check if a new item would fit on this SlottedPage.
         pub fn fits(self: *const Self, new_len: usize) bool {
-            const free = Page.Size - @sizeOf(Header) - self.header().used;
+            const free = Page.Size -
+                @sizeOf(Header) -
+                @sizeOf(ItemPointer) * self.header.count -
+                self.header.used_by_data;
             return new_len <= free;
         }
 
         /// Put a new item on this SlottedPage. The pointer is placed at the end of
         /// the pointer array.
         /// Returns the index of the added item.
-        pub fn add(self: *Self, data: []const u8) u16 {
+        pub fn add(self: *Self, data: []const u8) usize {
+            self.insert(data, self.pointers.len);
+            return self.pointers.len - 1;
+        }
+
+        /// Put a new item on this SlottedPage. The pointer is placed at the end of
+        /// the pointer array.
+        /// Returns the index of the added item.
+        pub fn insert(self: *Self, data: []const u8, i: usize) void {
             std.debug.assert(self.fits(data.len));
 
             // Offset of a last item on the page
-            const last_offset = if (self.pointers.len == 0)
-                Page.Size
-            else
-                self.pointers[self.pointers.len - 1].offset;
+            const last_offset = Page.Size - self.header.used_by_data;
             // The offset of the new tuple is *less* than the last one, and
             // the space between them must fit the heap tuple.
             const new_offset = last_offset - data.len;
 
             @memcpy(self.page.d[new_offset..last_offset], data);
             self.pointers.len += 1;
-            self.pointers[self.pointers.len - 1] = .{
+            if (i != self.pointers.len - 1)
+                @memmove(
+                    self.pointers[i + 1 .. self.pointers.len],
+                    self.pointers[i .. self.pointers.len - 1],
+                );
+            self.pointers[i] = .{
                 .offset = @intCast(new_offset),
                 .size = @intCast(data.len),
             };
-            self.header().count += 1;
-            self.header().used += @intCast(data.len + @sizeOf(ItemPointer));
-            return @intCast(self.pointers.len - 1);
+            self.header.count += 1;
+            self.header.used_by_data += @intCast(data.len);
         }
     };
 }

@@ -54,6 +54,8 @@ page_status: std.array_hash_map.Auto(ids.FullPageId, PageStatus),
 // Flag to mock storage cache without writing anything to actual filesystem
 mock_fs: bool = false,
 
+const StorageError = RawDataFile.StorageError;
+
 /// Initialize the page cache
 pub fn init(gpa: std.mem.Allocator, io: std.Io, base_path: []const u8) Cache {
     return .{
@@ -95,7 +97,7 @@ fn fetch(
     self: *Cache,
     id: ids.FullPageId,
     writeable: bool,
-) !PinnedPage {
+) StorageError!PinnedPage {
     // All of this has to be mutexed since hash maps are not thread-safe
     try self.mutex.lock(self.io);
     defer self.mutex.unlock(self.io);
@@ -143,12 +145,15 @@ fn fetch(
     // Remove the entry if anything goes wrong
     errdefer _ = self.pages.swapRemove(id);
     if (!page.found_existing) {
+        // std.debug.print("Created page {f}\n", .{id});
         page.value_ptr.* = self.page_pool.create(self.gpa) catch oom();
         // Read the page data if it wasn't in the cache
         if (!self.mock_fs)
             try rdf.read(id.page, page.value_ptr.*)
         else
             @memset(&page.value_ptr.*.d, 0);
+    } else {
+        // std.debug.print("Found page {f}\n", .{id});
     }
 
     // Form the PinnedPage to return
@@ -179,7 +184,7 @@ pub fn unpin(
 pub fn upgrade(
     self: *Cache,
     pinned_page: *PinnedPage,
-) !void {
+) StorageError!void {
     if (pinned_page.writeable) return;
     // We assume you can't pin a page if it doesn't exist
     const status = self.page_status.getPtr(pinned_page.id).?;
@@ -195,7 +200,7 @@ pub fn upgrade(
 pub fn get(
     self: *Cache,
     id: ids.FullPageId,
-) !PinnedPage {
+) StorageError!PinnedPage {
     return try self.fetch(id, false);
 }
 
@@ -203,12 +208,12 @@ pub fn get(
 pub fn getWriteable(
     self: *Cache,
     id: ids.FullPageId,
-) !PinnedPage {
+) StorageError!PinnedPage {
     return try self.fetch(id, true);
 }
 
 /// Flush all dirty pages in the cache to disk.
-pub fn flush(self: *Cache, force: bool) !void {
+pub fn flush(self: *Cache, force: bool) StorageError!void {
     if (self.mock_fs) return;
     // All of this has to be mutexed since hash maps are not thread-safe
     try self.mutex.lock(self.io);

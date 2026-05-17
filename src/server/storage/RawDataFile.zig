@@ -26,9 +26,13 @@ pub const Id = ids.FullFileId;
 /// Maximum allowed length of a file path.
 pub const PathMaxLen = 1024;
 
+pub const StorageError = std.Io.File.ReadPositionalError ||
+    std.Io.File.WritePositionalError ||
+    std.Io.Dir.CreateDirPathOpenError;
+
 /// Open a data file, create it if it doesn't exist.
 /// base_path is the root of the database filesystem.
-pub fn open(io: Io, base_path: []const u8, id: Id) !RawDataFile {
+pub fn open(io: Io, base_path: []const u8, id: Id) StorageError!RawDataFile {
     var buf: [PathMaxLen]u8 = undefined;
     var alloc = std.heap.FixedBufferAllocator.init(&buf);
 
@@ -75,7 +79,7 @@ pub fn close(self: *const RawDataFile) void {
 
 /// Read a whole page with a given id into the `out` pointer.
 /// If the page doesn't exist in the file, it is assumed to be filled with zeros.
-pub fn read(self: *const RawDataFile, id: Page.Id, out: *Page.Data) !void {
+pub fn read(self: *const RawDataFile, id: Page.Id, out: *Page.Data) StorageError!void {
     const offset = @as(u64, @intCast(id)) * Page.Size;
     const r = try self.file.readPositionalAll(self.io, &out.d, offset);
     if (r == 0) {
@@ -84,7 +88,7 @@ pub fn read(self: *const RawDataFile, id: Page.Id, out: *Page.Data) !void {
 }
 
 /// Write a whole page with a given id.
-pub fn write(self: *const RawDataFile, id: Page.Id, data: *const Page.Data) !void {
+pub fn write(self: *const RawDataFile, id: Page.Id, data: *const Page.Data) StorageError!void {
     const offset = @as(u64, @intCast(id)) * Page.Size;
     try self.file.writePositionalAll(self.io, &data.d, offset);
 }

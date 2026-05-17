@@ -208,14 +208,17 @@ pub fn CompactTuple(comptime Header: type) type {
             values: []Value,
         };
 
+        pub const UncompactError = error{MalformedTuple};
+
         /// Uncompact a tuple, reading its data into usable form.
         pub fn uncompact(
             self: Self,
             descr: *const TupleDescriptor,
             alloc: std.mem.Allocator,
-        ) !Uncompacted {
+        ) UncompactError!Uncompacted {
             var reader = std.Io.Reader.fixed(self.data);
-            return read(&reader, descr, alloc);
+            return read(&reader, descr, alloc) catch
+                return UncompactError.MalformedTuple;
         }
 
         /// Compact a tuple, packing the data into compact form.
@@ -234,7 +237,7 @@ pub fn CompactTuple(comptime Header: type) type {
             r: *std.Io.Reader,
             descr: *const TupleDescriptor,
             alloc: std.mem.Allocator,
-        ) !Uncompacted {
+        ) Value.ReadError!Uncompacted {
             const header = if (Header == void)
                 void{}
             else
@@ -273,7 +276,7 @@ pub fn CompactTuple(comptime Header: type) type {
             w: *std.Io.Writer,
             data: Uncompacted,
             descr: *const TupleDescriptor,
-        ) !void {
+        ) std.Io.Writer.Error!void {
             std.debug.assert(data.values.len == descr.len());
 
             if (Header != void)

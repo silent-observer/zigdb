@@ -50,7 +50,7 @@ pub const Text = union(enum) {
 
     pub fn read(
         r: *std.Io.Reader,
-    ) !Text {
+    ) Value.ReadError!Text {
         const size = try r.takeLeb128(i32);
         if (size >= 0) {
             return makeRaw(try r.take(@intCast(size)));
@@ -69,7 +69,7 @@ pub const Text = union(enum) {
     pub fn write(
         self: *const Text,
         w: *std.Io.Writer,
-    ) !void {
+    ) std.Io.Writer.Error!void {
         switch (self.*) {
             .raw => |r| {
                 try w.writeSleb128(@as(i32, @intCast(r.len)));
@@ -97,6 +97,20 @@ pub const Text = union(enum) {
             .toast => {},
         }
     }
+
+    pub fn order(lhs: Text, rhs: Text) std.math.Order {
+        if (lhs != .raw or rhs != .raw)
+            @panic("Toast text comparisons are not supported yet");
+
+        return std.mem.order(u8, lhs.raw, rhs.raw);
+    }
+
+    pub fn eql(lhs: Text, rhs: Text) bool {
+        if (lhs != .raw or rhs != .raw)
+            @panic("Toast text comparisons are not supported yet");
+
+        return std.mem.eql(u8, lhs.raw, rhs.raw);
+    }
 };
 
 /// Value of runtime-known type.
@@ -108,8 +122,14 @@ pub const Value = union(enum) {
     uuid: uuid.Uuid,
     null: void,
 
+    pub const ReadError = error{
+        Overflow,
+        InvalidTextFormat,
+    } || std.Io.Reader.Error;
+    pub const TypeError = error{InvalidType};
+
     /// Obtain comptime-known type from a Value.
-    pub fn to(v: Value, comptime T: type) Error!T {
+    pub fn to(v: Value, comptime T: type) TypeError!T {
         if (@typeInfo(T) == .optional) {
             if (v == .null)
                 return null
@@ -121,20 +141,20 @@ pub const Value = union(enum) {
             i8, i16, i32, i64, u8, u16, u32, u64 => if (v == .int)
                 return @intCast(v.int)
             else
-                return Error.InvalidType,
+                return TypeError.InvalidType,
             Text => if (v == .text)
                 return v.text
             else
-                return Error.InvalidType,
+                return TypeError.InvalidType,
             bool => if (v == .boolean)
                 return v.boolean
             else
-                return Error.InvalidType,
+                return TypeError.InvalidType,
             uuid.Uuid => if (v == .uuid)
                 return v.uuid
             else
-                return Error.InvalidType,
-            else => return Error.InvalidType,
+                return TypeError.InvalidType,
+            else => return TypeError.InvalidType,
         }
     }
 
@@ -178,8 +198,6 @@ pub const Value = union(enum) {
         }
     }
 
-    pub const Error = error{InvalidType};
-
     /// Format the Value as string.
     pub fn format(
         self: Value,
@@ -189,6 +207,8 @@ pub const Value = union(enum) {
             .int => |x| try writer.print("{}", .{x}),
             .text => |s| try writer.print("\"{s}\"", .{s.text()}),
             .boolean => |b| try writer.print("{}", .{b}),
+            .uuid => |u| try writer.print("{s}", .{&uuid.urn.serialize(u)}),
+            .null => try writer.writeAll("NULL"),
         }
     }
 
@@ -213,16 +233,16 @@ pub const Value = union(enum) {
     pub fn read(
         r: *std.Io.Reader,
         dbtype: t.DBType,
-    ) !Value {
+    ) ReadError!Value {
         switch (dbtype) {
             .uint1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
             .uint2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
             .uint4, .serial => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
             .uint8, .oid => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
-            .int1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
-            .int2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
-            .int4 => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
-            .int8 => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
+            .int1 => return .{ .int = @intCast(try r.takeInt(i8, .little)) },
+            .int2 => return .{ .int = @intCast(try r.takeInt(i16, .little)) },
+            .int4 => return .{ .int = @intCast(try r.takeInt(i32, .little)) },
+            .int8 => return .{ .int = @intCast(try r.takeInt(i64, .little)) },
             .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
             .boolean => return .{ .boolean = try r.takeByte() != 0 },
             .nulltype => return .null,
@@ -234,7 +254,7 @@ pub const Value = union(enum) {
         self: Value,
         dbtype: t.DBType,
         w: *std.Io.Writer,
-    ) !void {
+    ) std.Io.Writer.Error!void {
         if (self == .null) return;
         switch (dbtype) {
             .uint1 => try w.writeInt(u8, @intCast(self.int), .little),
@@ -263,6 +283,59 @@ pub const Value = union(enum) {
         switch (self) {
             .int, .boolean, .null, .uuid => {},
             .text => |text| text.deinit(alloc),
+        }
+    }
+
+    pub fn order(lhs: Value, rhs: Value, dbtype: t.DBType) std.math.Order {
+        if (lhs == .null and rhs == .null)
+            return .eq;
+        if (lhs == .null) return .gt;
+        if (rhs == .null) return .lt;
+
+        switch (dbtype) {
+            .uint1,
+            .uint2,
+            .uint4,
+            .uint8,
+            .oid,
+            .serial,
+            .int1,
+            .int2,
+            .int4,
+            .int8,
+            => return std.math.order(lhs.int, rhs.int),
+            .uuid => return std.math.order(lhs.uuid, rhs.uuid),
+            .boolean => return std.math.order(
+                @intFromBool(lhs.boolean),
+                @intFromBool(rhs.boolean),
+            ),
+            .text, .long_text => return lhs.text.order(rhs.text),
+            .nulltype => unreachable,
+        }
+    }
+
+    pub fn eql(lhs: Value, rhs: Value, dbtype: t.DBType) bool {
+        if (lhs == .null and rhs == .null)
+            return true;
+        if (lhs == .null or rhs == .null)
+            return false;
+
+        switch (dbtype) {
+            .uint1,
+            .uint2,
+            .uint4,
+            .uint8,
+            .oid,
+            .serial,
+            .int1,
+            .int2,
+            .int4,
+            .int8,
+            => return lhs.int == rhs.int,
+            .uuid => return lhs.uuid == rhs.uuid,
+            .boolean => return lhs.boolean == rhs.boolean,
+            .text, .long_text => return lhs.text.eql(rhs.text),
+            .nulltype => unreachable,
         }
     }
 };

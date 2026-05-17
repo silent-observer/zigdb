@@ -180,7 +180,7 @@ pub fn addOneTuple(self: HeapTable, tuple: MemTuple, alloc: std.mem.Allocator) !
         const index = page.add(heap_tuple.data);
         break :block MemTuple.Pos{
             .page_id = raw_page.id.page,
-            .index = index,
+            .index = @intCast(index),
         };
     };
 

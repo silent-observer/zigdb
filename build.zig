@@ -18,6 +18,7 @@ pub fn build(b: *std.Build) void {
     const common = b.addModule("common", .{
         .root_source_file = b.path("src/common/common.zig"),
         .target = target,
+        .optimize = optimize,
         .imports = &.{
             .{ .name = "uuid", .module = uuid.module("uuid") },
         },
@@ -27,6 +28,7 @@ pub fn build(b: *std.Build) void {
     const mod = b.addModule("zigdb", .{
         .root_source_file = b.path("src/server/root.zig"),
         .target = target,
+        .optimize = optimize,
         .imports = &.{
             .{ .name = "common", .module = common },
             .{ .name = "uuid", .module = uuid.module("uuid") },
@@ -94,10 +96,18 @@ pub fn build(b: *std.Build) void {
         .use_llvm = true,
     });
 
+    const lib_unit_tests = b.addTest(.{ .root_module = mod });
+    const lib_unit_tests_check = b.addTest(.{ .root_module = mod });
+    b.installArtifact(lib_unit_tests);
+    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_lib_unit_tests.step);
+
     // Run the compilation checks (for ZLS)
     const check_step = b.step("check", "Check if zigdb compiles");
     check_step.dependOn(&server_exe_check.step);
     check_step.dependOn(&client_exe_check.step);
+    check_step.dependOn(&lib_unit_tests_check.step);
 
     // Main executable steps
     const run_server_step = b.step("run-server", "Run the server");

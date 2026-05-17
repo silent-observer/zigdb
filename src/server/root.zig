@@ -3,6 +3,7 @@ const std = @import("std");
 pub const common = @import("common");
 pub const storage = @import("storage.zig");
 const heap = @import("heap.zig");
+pub const btree = @import("btree.zig");
 pub const ids = common.ids;
 pub const catalog = @import("catalog.zig");
 pub const transaction = @import("transaction.zig");
@@ -19,3 +20,7 @@ const Parser = @import("sql/Parser.zig");
 const Context = @import("executor/Context.zig");
 const Plan = planner.Plan;
 const Planner = planner.Planner;
+
+test {
+    std.testing.refAllDecls(@This());
+}

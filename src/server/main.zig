@@ -66,6 +66,7 @@ pub fn main(init: std.process.Init) !void {
         init.gpa,
         try std.Io.Dir.cwd().openDir(init.io, "/tmp/datadir/logs", .{}),
     );
+    defer logger.deinit(init.gpa);
 
     // Initialize the catalog table descriptors
     zigdb.catalog.tables.init(init.arena.allocator());
