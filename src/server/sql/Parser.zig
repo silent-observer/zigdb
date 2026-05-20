@@ -672,53 +672,53 @@ fn parseType(p: *Parser) InternalError!DBType {
     const t = p.peek();
     if (t.keyword()) |kw| switch (kw) {
         .int1 => {
-            p.pos += 1;
-            return .int1;
+            p.advance();
+            return .b(.int1);
         },
         .int2 => {
-            p.pos += 1;
-            return .int2;
+            p.advance();
+            return .b(.int2);
         },
         .int, .int4 => {
-            p.pos += 1;
-            return .int4;
+            p.advance();
+            return .b(.int4);
         },
         .int8 => {
-            p.pos += 1;
-            return .int8;
+            p.advance();
+            return .b(.int8);
         },
         .uint1 => {
-            p.pos += 1;
-            return .uint1;
+            p.advance();
+            return .b(.uint1);
         },
         .uint2 => {
-            p.pos += 1;
-            return .uint2;
+            p.advance();
+            return .b(.uint2);
         },
         .uint4 => {
-            p.pos += 1;
-            return .uint4;
+            p.advance();
+            return .b(.uint4);
         },
         .uint8 => {
-            p.pos += 1;
-            return .uint8;
+            p.advance();
+            return .b(.uint8);
         },
         .boolean => {
-            p.pos += 1;
-            return .boolean;
+            p.advance();
+            return .b(.boolean);
         },
         .long => {
-            p.pos += 1;
+            p.advance();
             try p.expectKeyword(.text);
-            return .long_text;
+            return .b(.long_text);
         },
         .text => {
-            p.pos += 1;
-            return .text;
+            p.advance();
+            return .b(.text);
         },
         .serial => {
-            p.pos += 1;
-            return .serial;
+            p.advance();
+            return .b(.serial);
         },
         else => {},
     };

@@ -136,7 +136,7 @@ fn executeShowTables(cxt: *Context) ![]const u8 {
     var descr = common.TupleDescriptor.empty;
     descr.attrs.append(cxt.alloc, .{
         .name = "tables",
-        .t = .text,
+        .t = .b(.text),
     }) catch oom();
 
     try s.sender.send(.{ .tuple_descriptor = &descr });

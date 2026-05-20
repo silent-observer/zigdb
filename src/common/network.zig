@@ -114,7 +114,9 @@ pub const Message = union(Tag) {
             .tuple_descriptor => |td| size: {
                 var total_size: usize = @sizeOf(u8) + @sizeOf(u16);
                 for (td.attrs.items) |att| {
-                    total_size += @sizeOf(u32) + @sizeOf(u8) + att.name.len;
+                    total_size +=
+                        @sizeOf(u8) + att.t.writeLen() +
+                        @sizeOf(u8) + att.name.len;
                 }
                 break :size total_size;
             },
@@ -136,7 +138,8 @@ pub const Message = union(Tag) {
                 try w.writeByte(@intFromBool(td.has_extended));
                 try w.writeInt(u16, @intCast(td.len()), .little);
                 for (td.attrs.items) |att| {
-                    try w.writeInt(u32, @intFromEnum(att.t), .little);
+                    try w.writeByte(@intCast(att.t.writeLen()));
+                    try att.t.write(w);
                     try w.writeByte(@intCast(att.name.len));
                     try w.writeAll(att.name);
                 }
@@ -173,7 +176,10 @@ pub const Message = union(Tag) {
                 var attrs = std.ArrayList(AttributeDescriptor)
                     .initCapacity(alloc, attrs_len) catch oom();
                 for (0..attrs_len) |_| {
-                    const dbtype: DBType = @enumFromInt(try r.takeInt(u32, .little));
+                    const dbtype_len = try r.takeByte();
+                    const dbtype_buf = try r.take(dbtype_len);
+                    var dbtype_reader = std.Io.Reader.fixed(dbtype_buf);
+                    const dbtype = try DBType.read(&dbtype_reader);
                     const name_len = try r.takeByte();
                     const name = try r.readAlloc(alloc, name_len);
                     attrs.appendAssumeCapacity(AttributeDescriptor{

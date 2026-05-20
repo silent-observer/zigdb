@@ -89,17 +89,17 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .rel_id,
-                .db_type = .oid,
+                .db_type = .b(.oid),
                 .t = u32,
             },
             AttributeEntry{
                 .id = .rel_name,
-                .db_type = .text,
+                .db_type = .b(.text),
                 .t = common.Text,
             },
             AttributeEntry{
                 .id = .rel_toast_id,
-                .db_type = .oid,
+                .db_type = .b(.oid),
                 .t = ?u32,
             },
         },
@@ -109,22 +109,22 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .attr_rel_id,
-                .db_type = .oid,
+                .db_type = .b(.oid),
                 .t = u32,
             },
             AttributeEntry{
                 .id = .attr_id,
-                .db_type = .uint1,
+                .db_type = .b(.uint1),
                 .t = u8,
             },
             AttributeEntry{
                 .id = .attr_type,
-                .db_type = .uint4,
-                .t = u32,
+                .db_type = .b(.dbtype),
+                .t = common.DBType,
             },
             AttributeEntry{
                 .id = .attr_name,
-                .db_type = .text,
+                .db_type = .b(.text),
                 .t = common.Text,
             },
         },
@@ -134,17 +134,17 @@ const Tables: []const TableEntry = &.{
         .attrs = &.{
             AttributeEntry{
                 .id = .toast_id,
-                .db_type = .serial,
+                .db_type = .b(.serial),
                 .t = u64,
             },
             AttributeEntry{
                 .id = .toast_seq,
-                .db_type = .uint4,
+                .db_type = .b(.uint4),
                 .t = u32,
             },
             AttributeEntry{
                 .id = .toast_data,
-                .db_type = .text,
+                .db_type = .b(.text),
                 .t = common.Text,
             },
         },

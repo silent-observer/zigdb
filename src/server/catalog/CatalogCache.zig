@@ -99,7 +99,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
         while (attr_scanner.next()) |attr| {
             descr.attrs.append(self.gpa, .{
                 .name = attr.attr_name.text(),
-                .t = @enumFromInt(attr.attr_type),
+                .t = attr.attr_type,
                 .table_name = rel.rel_name.text(),
             }) catch oom();
         }
@@ -203,7 +203,11 @@ pub fn Table(comptime id: tables.TableId) type {
             // Go through all the fields in the Row struct
             inline for (std.meta.fields(Row)) |f| {
                 // Put each one into the MemTuple
-                const val = common.Value.from(f.type, @field(row, f.name));
+                const val = common.Value.from(
+                    f.type,
+                    @field(row, f.name),
+                    alloc,
+                );
                 values.appendAssumeCapacity(val);
             }
 
@@ -479,7 +483,7 @@ pub fn build(self: *CatalogCache) !void {
             try self.catalog.zdb_attrs.add(self.storage_cache, .{
                 .attr_rel_id = @intFromEnum(rel_id),
                 .attr_id = @intCast(i),
-                .attr_type = @intFromEnum(att.t),
+                .attr_type = att.t,
                 .attr_name = .makeRaw(att.name),
             }, .frozen);
         }

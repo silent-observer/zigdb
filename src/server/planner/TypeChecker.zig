@@ -187,7 +187,7 @@ fn checkInsertValues(t: *TypeChecker, stmt: *ast.Statement.InsertValues) bool {
         // Fill in missing columns with default values
         for (full_descr.attrs.items, 0..) |att, i| {
             if (column_given.isSet(i)) continue;
-            if (att.t != .serial) {
+            if (att.t != .base or att.t.base != .serial) {
                 t.addError(
                     "Missing value for column \"{s}\" in table \"{s}\"",
                     .{ att.name, stmt.name.text },
@@ -268,7 +268,7 @@ fn checkSelect(t: *TypeChecker, stmt: *ast.Statement.Select) bool {
     if (stmt.where) |condition| {
         _ = t.checkExprType(
             condition,
-            .{ .db = .boolean },
+            .{ .db = .b(.boolean) },
             stmt.source.t.?,
         ) catch {
             return false;
@@ -311,7 +311,7 @@ fn checkDelete(t: *TypeChecker, stmt: *ast.Statement.Delete) bool {
     if (stmt.where) |condition| {
         _ = t.checkExprType(
             condition,
-            .{ .db = .boolean },
+            .{ .db = .b(.boolean) },
             full_descr,
         ) catch {
             return false;
@@ -330,7 +330,7 @@ fn checkUpdate(t: *TypeChecker, stmt: *ast.Statement.Update) bool {
     if (stmt.where) |condition| {
         _ = t.checkExprType(
             condition,
-            .{ .db = .boolean },
+            .{ .db = .b(.boolean) },
             full_descr,
         ) catch {
             return false;
@@ -481,7 +481,7 @@ const TypeRequest = union(enum) {
         switch (r) {
             .db => |rdb| return t.convertsTo(rdb),
             .any_int => return t.isNumber(),
-            .any_text => return t == .text or t == .long_text,
+            .any_text => return t == .base and (t.base == .text or t.base == .long_text),
             .any => return true,
         }
     }
@@ -525,40 +525,44 @@ fn checkExprType(
         },
         .value => |v| { // A constant value
             if (request == .db) {
+                if (request.db != .base) {
+                    t.addError("Expected {f} but got integer constant", .{request});
+                    return Error.TypeError;
+                }
                 // We are expected to provide a specific type, check if we can
                 switch (v) {
                     .int => if (!request.db.isNumber()) {
                         t.addError("Expected {f} but got integer constant", .{request});
                         return Error.TypeError;
                     },
-                    .text => if (request.db != .text and request.db != .long_text) {
+                    .text => if (request.db.base != .text and request.db.base != .long_text) {
                         t.addError("Expected {f} but got text constant", .{request});
                         return Error.TypeError;
                     },
-                    .boolean => if (request.db != .boolean) {
+                    .boolean => if (request.db.base != .boolean) {
                         t.addError("Expected {f} but got boolean constant", .{request});
                         return Error.TypeError;
                     },
                     .null => {},
-                    .uuid => if (request.db != .uuid) {
+                    .uuid => if (request.db.base != .uuid) {
                         t.addError("Expected {f} but got uuid constant", .{request});
                         return Error.TypeError;
                     },
                 }
                 break :expr_type request.db;
             } else switch (v) { // We can choose the type ourselves
-                .int => break :expr_type .int4,
-                .text => break :expr_type .text,
-                .boolean => break :expr_type .boolean,
-                .null => break :expr_type .nulltype,
-                .uuid => break :expr_type .uuid,
+                .int => break :expr_type .b(.int4),
+                .text => break :expr_type .b(.text),
+                .boolean => break :expr_type .b(.boolean),
+                .null => break :expr_type .b(.nulltype),
+                .uuid => break :expr_type .b(.uuid),
             }
         },
         .unary => |u| {
             switch (u.op) {
                 .not => {
-                    _ = try t.checkExprType(u.expr, .{ .db = .boolean }, cxt);
-                    break :expr_type .boolean;
+                    _ = try t.checkExprType(u.expr, .{ .db = .b(.boolean) }, cxt);
+                    break :expr_type .b(.boolean);
                 },
                 .neg => {
                     // For simplicity, forward the same request to the child
@@ -571,7 +575,7 @@ fn checkExprType(
                 },
                 .null, .not_null => {
                     _ = try t.checkExprType(u.expr, .any, cxt);
-                    break :expr_type .boolean;
+                    break :expr_type .b(.boolean);
                 },
             }
         },
@@ -593,9 +597,9 @@ fn checkExprType(
                     break :expr_type lhs.maxIntType(rhs);
                 },
                 .@"and", .@"or" => { // Can do and/or only on booleans
-                    _ = try t.checkExprType(u.left, .{ .db = .boolean }, cxt);
-                    _ = try t.checkExprType(u.right, .{ .db = .boolean }, cxt);
-                    break :expr_type .boolean;
+                    _ = try t.checkExprType(u.left, .{ .db = .b(.boolean) }, cxt);
+                    _ = try t.checkExprType(u.right, .{ .db = .b(.boolean) }, cxt);
+                    break :expr_type .b(.boolean);
                 },
                 .eq, .ne => { // Can check equality of numbers and values of the same type
                     const lhs = try t.checkExprType(u.left, .any, cxt);
@@ -605,12 +609,12 @@ fn checkExprType(
                     if (!both_numbers and !same_type) {
                         t.addError("Cannot compare types {f} and {f}", .{ lhs, rhs });
                         return Error.TypeError;
-                    } else break :expr_type .boolean;
+                    } else break :expr_type .b(.boolean);
                 },
                 .lt, .gt, .le, .ge => { // Can only compare numbers
                     _ = try t.checkExprType(u.left, .any_int, cxt);
                     _ = try t.checkExprType(u.right, .any_int, cxt);
-                    break :expr_type .boolean;
+                    break :expr_type .b(.boolean);
                 },
             }
         },
@@ -629,7 +633,7 @@ fn checkExprType(
                     return Error.TypeError;
                 }
                 _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
-                break :expr_type .uint4;
+                break :expr_type .b(.uint4);
             },
             .concat => {
                 if (f.inputs.len != 2) {
@@ -638,7 +642,7 @@ fn checkExprType(
                 }
                 _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
                 _ = try t.checkExprType(&f.inputs[1], .any_text, cxt);
-                break :expr_type .text;
+                break :expr_type .b(.text);
             },
             .substring => {
                 if (f.inputs.len != 3) {
@@ -648,7 +652,7 @@ fn checkExprType(
                 _ = try t.checkExprType(&f.inputs[0], .any_text, cxt);
                 _ = try t.checkExprType(&f.inputs[1], .any_int, cxt);
                 _ = try t.checkExprType(&f.inputs[2], .any_int, cxt);
-                break :expr_type .text;
+                break :expr_type .b(.text);
             },
         },
         .err => unreachable,
@@ -733,7 +737,7 @@ fn checkJoin(t: *TypeChecker, ds: *ast.DataSource, need_extended: bool) bool {
 
     // Check the join condition
     if (ds.u.join.cond) |c|
-        _ = t.checkExprType(c, .{ .db = .boolean }, new_descr) catch return false;
+        _ = t.checkExprType(c, .{ .db = .b(.boolean) }, new_descr) catch return false;
 
     return true;
 }

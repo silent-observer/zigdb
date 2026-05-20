@@ -494,7 +494,7 @@ test "basic btree index" {
     try index.create();
 
     var descr = TupleDescriptor.empty;
-    descr.attrs.append(gpa, .{ .name = "i", .t = .int4 }) catch oom();
+    descr.attrs.append(gpa, .{ .name = "i", .t = .b(.int4) }) catch oom();
     defer descr.attrs.deinit(gpa);
 
     var walker = try BTreeWalker.init(
@@ -596,9 +596,9 @@ test "complex btree index" {
     try index.create();
 
     var descr = TupleDescriptor.empty;
-    descr.attrs.append(gpa, .{ .name = "i", .t = .int4 }) catch oom();
-    descr.attrs.append(gpa, .{ .name = "j", .t = .int4 }) catch oom();
-    descr.attrs.append(gpa, .{ .name = "t", .t = .text }) catch oom();
+    descr.attrs.append(gpa, .{ .name = "i", .t = .b(.int4) }) catch oom();
+    descr.attrs.append(gpa, .{ .name = "j", .t = .b(.int4) }) catch oom();
+    descr.attrs.append(gpa, .{ .name = "t", .t = .b(.text) }) catch oom();
     defer descr.attrs.deinit(gpa);
 
     var walker = try BTreeWalker.init(

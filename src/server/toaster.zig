@@ -39,8 +39,8 @@ const Text = common.Text;
 pub fn hasToastable(descr: *const common.TupleDescriptor) bool {
     for (descr.attrs.items) |att| {
         switch (att.t) {
-            .long_text => return true,
-            else => {},
+            .arr => |a| return a.base == .long_text,
+            .base => |base| return base == .long_text,
         }
     }
     return false;

@@ -165,7 +165,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
             0..,
         ) |*scalar, att, i| {
             if (column_given.isSet(i)) continue;
-            if (att.t == .serial) {
+            if (att.t == .base and att.t.base == .serial) {
                 scalar.* = .{
                     .dbtype = att.t,
                     .action = .{ .next_serial = table.rel_id },

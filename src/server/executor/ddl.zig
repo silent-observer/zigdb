@@ -62,7 +62,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
                 .attr_id = @intCast(i),
                 .attr_rel_id = table_id,
                 .attr_name = .makeRaw(att.name),
-                .attr_type = @intFromEnum(att.t),
+                .attr_type = att.t,
             },
             s.current_tid.real,
         );
@@ -91,7 +91,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
                 .attr_id = 0,
                 .attr_rel_id = toast_id,
                 .attr_name = .makeRaw("toast_id"),
-                .attr_type = @intFromEnum(common.DBType.serial),
+                .attr_type = .b(.serial),
             },
             s.current_tid.real,
         );
@@ -101,7 +101,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
                 .attr_id = 1,
                 .attr_rel_id = toast_id,
                 .attr_name = .makeRaw("toast_seq"),
-                .attr_type = @intFromEnum(common.DBType.uint4),
+                .attr_type = .b(.uint4),
             },
             s.current_tid.real,
         );
@@ -111,7 +111,7 @@ pub fn executeCreateTable(stmt: Plan.Statement.CreateTable, cxt: *Context) ![]co
                 .attr_id = 2,
                 .attr_rel_id = toast_id,
                 .attr_name = .makeRaw("toast_data"),
-                .attr_type = @intFromEnum(common.DBType.text),
+                .attr_type = .b(.text),
             },
             s.current_tid.real,
         );

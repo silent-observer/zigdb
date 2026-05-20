@@ -154,24 +154,33 @@ pub const Value = union(enum) {
                 return v.uuid
             else
                 return TypeError.InvalidType,
+            t.DBType => if (v == .text) {
+                var r = std.Io.Reader.fixed(v.text.text());
+                return t.DBType.read(&r) catch return TypeError.InvalidType;
+            } else return TypeError.InvalidType,
             else => return TypeError.InvalidType,
         }
     }
 
     /// Obtain comptime-known type from a Value.
-    pub fn from(comptime T: type, v: T) Value {
+    pub fn from(comptime T: type, v: T, alloc: std.mem.Allocator) Value {
         if (@typeInfo(T) == .optional) {
             if (v == null)
                 return .null
             else
-                return from(@typeInfo(T).optional.child, v.?);
+                return from(@typeInfo(T).optional.child, v.?, alloc);
         }
 
         return switch (T) {
             i8, i16, i32, i64, u8, u16, u32, u64 => .{ .int = @intCast(v) },
-            Text => .{ .text = v },
+            Text => .{ .text = v.clone(alloc) },
             bool => .{ .boolean = v },
             uuid.Uuid => .{ .uuid = v },
+            t.DBType => block: {
+                var writer = std.Io.Writer.Allocating.init(alloc);
+                v.write(&writer.writer) catch oom();
+                break :block .{ .text = .makeRaw(writer.written()) };
+            },
             else => comptime unreachable,
         };
     }
@@ -235,18 +244,21 @@ pub const Value = union(enum) {
         dbtype: t.DBType,
     ) ReadError!Value {
         switch (dbtype) {
-            .uint1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
-            .uint2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
-            .uint4, .serial => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
-            .uint8, .oid => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
-            .int1 => return .{ .int = @intCast(try r.takeInt(i8, .little)) },
-            .int2 => return .{ .int = @intCast(try r.takeInt(i16, .little)) },
-            .int4 => return .{ .int = @intCast(try r.takeInt(i32, .little)) },
-            .int8 => return .{ .int = @intCast(try r.takeInt(i64, .little)) },
-            .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
-            .boolean => return .{ .boolean = try r.takeByte() != 0 },
-            .nulltype => return .null,
-            .text, .long_text => return .{ .text = try Text.read(r) },
+            .base => |base| switch (base) {
+                .uint1 => return .{ .int = @intCast(try r.takeInt(u8, .little)) },
+                .uint2 => return .{ .int = @intCast(try r.takeInt(u16, .little)) },
+                .uint4, .serial => return .{ .int = @intCast(try r.takeInt(u32, .little)) },
+                .uint8, .oid => return .{ .int = @intCast(try r.takeInt(u64, .little)) },
+                .int1 => return .{ .int = @intCast(try r.takeInt(i8, .little)) },
+                .int2 => return .{ .int = @intCast(try r.takeInt(i16, .little)) },
+                .int4 => return .{ .int = @intCast(try r.takeInt(i32, .little)) },
+                .int8 => return .{ .int = @intCast(try r.takeInt(i64, .little)) },
+                .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
+                .boolean => return .{ .boolean = try r.takeByte() != 0 },
+                .nulltype => return .null,
+                .text, .long_text, .dbtype => return .{ .text = try Text.read(r) },
+            },
+            .arr => @panic("TODO: Array type"),
         }
     }
 
@@ -257,18 +269,21 @@ pub const Value = union(enum) {
     ) std.Io.Writer.Error!void {
         if (self == .null) return;
         switch (dbtype) {
-            .uint1 => try w.writeInt(u8, @intCast(self.int), .little),
-            .uint2 => try w.writeInt(u16, @intCast(self.int), .little),
-            .uint4, .serial => try w.writeInt(u32, @intCast(self.int), .little),
-            .uint8, .oid => try w.writeInt(u64, @intCast(self.int), .little),
-            .int1 => try w.writeInt(i8, @intCast(self.int), .little),
-            .int2 => try w.writeInt(i16, @intCast(self.int), .little),
-            .int4 => try w.writeInt(i32, @intCast(self.int), .little),
-            .int8 => try w.writeInt(i64, @intCast(self.int), .little),
-            .uuid => try w.writeInt(uuid.Uuid, self.uuid, .little),
-            .boolean => try w.writeByte(@intFromBool(self.boolean)),
-            .nulltype => unreachable,
-            .text, .long_text => try self.text.write(w),
+            .base => |base| switch (base) {
+                .uint1 => try w.writeInt(u8, @intCast(self.int), .little),
+                .uint2 => try w.writeInt(u16, @intCast(self.int), .little),
+                .uint4, .serial => try w.writeInt(u32, @intCast(self.int), .little),
+                .uint8, .oid => try w.writeInt(u64, @intCast(self.int), .little),
+                .int1 => try w.writeInt(i8, @intCast(self.int), .little),
+                .int2 => try w.writeInt(i16, @intCast(self.int), .little),
+                .int4 => try w.writeInt(i32, @intCast(self.int), .little),
+                .int8 => try w.writeInt(i64, @intCast(self.int), .little),
+                .uuid => try w.writeInt(uuid.Uuid, self.uuid, .little),
+                .boolean => try w.writeByte(@intFromBool(self.boolean)),
+                .nulltype => unreachable,
+                .text, .long_text, .dbtype => try self.text.write(w),
+            },
+            .arr => @panic("TODO: Array type"),
         }
     }
 
@@ -293,24 +308,27 @@ pub const Value = union(enum) {
         if (rhs == .null) return .lt;
 
         switch (dbtype) {
-            .uint1,
-            .uint2,
-            .uint4,
-            .uint8,
-            .oid,
-            .serial,
-            .int1,
-            .int2,
-            .int4,
-            .int8,
-            => return std.math.order(lhs.int, rhs.int),
-            .uuid => return std.math.order(lhs.uuid, rhs.uuid),
-            .boolean => return std.math.order(
-                @intFromBool(lhs.boolean),
-                @intFromBool(rhs.boolean),
-            ),
-            .text, .long_text => return lhs.text.order(rhs.text),
-            .nulltype => unreachable,
+            .base => |base| switch (base) {
+                .uint1,
+                .uint2,
+                .uint4,
+                .uint8,
+                .oid,
+                .serial,
+                .int1,
+                .int2,
+                .int4,
+                .int8,
+                => return std.math.order(lhs.int, rhs.int),
+                .uuid => return std.math.order(lhs.uuid, rhs.uuid),
+                .boolean => return std.math.order(
+                    @intFromBool(lhs.boolean),
+                    @intFromBool(rhs.boolean),
+                ),
+                .text, .long_text, .dbtype => return lhs.text.order(rhs.text),
+                .nulltype => unreachable,
+            },
+            .arr => @panic("TODO: Array type"),
         }
     }
 
@@ -321,21 +339,24 @@ pub const Value = union(enum) {
             return false;
 
         switch (dbtype) {
-            .uint1,
-            .uint2,
-            .uint4,
-            .uint8,
-            .oid,
-            .serial,
-            .int1,
-            .int2,
-            .int4,
-            .int8,
-            => return lhs.int == rhs.int,
-            .uuid => return lhs.uuid == rhs.uuid,
-            .boolean => return lhs.boolean == rhs.boolean,
-            .text, .long_text => return lhs.text.eql(rhs.text),
-            .nulltype => unreachable,
+            .base => |base| switch (base) {
+                .uint1,
+                .uint2,
+                .uint4,
+                .uint8,
+                .oid,
+                .serial,
+                .int1,
+                .int2,
+                .int4,
+                .int8,
+                => return lhs.int == rhs.int,
+                .uuid => return lhs.uuid == rhs.uuid,
+                .boolean => return lhs.boolean == rhs.boolean,
+                .text, .long_text, .dbtype => return lhs.text.eql(rhs.text),
+                .nulltype => unreachable,
+            },
+            .arr => @panic("TODO: Array type"),
         }
     }
 };
