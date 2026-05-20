@@ -68,21 +68,16 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Contex
                     return .{ .boolean = v };
                 },
                 .eq, .ne => {
-                    const v = switch (lhs) {
-                        .null => unreachable,
-                        .boolean => lhs.boolean == rhs.boolean,
-                        .int => lhs.int == rhs.int,
-                        .uuid => lhs.uuid == rhs.uuid,
-                        .text => std.mem.eql(u8, lhs.text.text(), rhs.text.text()),
-                    };
+                    const v = common.Value.eql(lhs, rhs, scalar.dbtype);
                     return .{ .boolean = if (b.op == .eq) v else !v };
                 },
                 .lt, .gt, .le, .ge => {
+                    const o = common.Value.order(lhs, rhs, scalar.dbtype);
                     const v = switch (b.op) {
-                        .lt => lhs.int < rhs.int,
-                        .gt => lhs.int > rhs.int,
-                        .le => lhs.int <= rhs.int,
-                        .ge => lhs.int >= rhs.int,
+                        .lt => o.compare(.lt),
+                        .gt => o.compare(.gt),
+                        .le => o.compare(.lte),
+                        .ge => o.compare(.gte),
                         else => unreachable,
                     };
                     return .{ .boolean = v };

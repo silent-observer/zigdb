@@ -84,20 +84,12 @@ pub fn format(
 
             const total_pad = w - width;
             const left_pad = switch (v) {
-                .boolean, .text, .uuid, .null => 0,
+                .boolean, .text, .uuid, .null, .array => 0,
                 .int => total_pad,
             };
             const right_pad = total_pad - left_pad;
             try writer.splatByteAll(' ', left_pad + 1);
-
-            switch (v) {
-                .boolean => |b| try writer.writeByte(if (b) 't' else 'f'),
-                .int => |x| try writer.print("{}", .{x}),
-                .text => |s| try writer.writeAll(s.text()),
-                .uuid => |u| try writer.writeAll(&uuid.urn.serialize(u)),
-                .null => {},
-            }
-
+            try v.formatForClient(writer);
             try writer.splatByteAll(' ', right_pad + 1);
         }
         try writer.writeByte('\n');

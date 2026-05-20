@@ -261,8 +261,8 @@ pub fn CompactTuple(comptime Header: type) type {
                 if (is_null)
                     vals.appendAssumeCapacity(.null)
                 else {
-                    const val = try Value.read(r, att.t);
-                    vals.appendAssumeCapacity(val.clone(alloc));
+                    const val = try Value.read(r, att.t, alloc);
+                    vals.appendAssumeCapacity(val);
                 }
             }
             return .{

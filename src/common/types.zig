@@ -67,6 +67,16 @@ pub const DBType = union(enum) {
     pub const Array = struct {
         count: u3,
         base: Base,
+
+        pub fn child(self: Array) DBType {
+            if (self.count == 1)
+                return .b(self.base)
+            else
+                return .{ .arr = .{
+                    .count = self.count - 1,
+                    .base = self.base,
+                } };
+        }
     };
 
     pub fn writeLen(self: DBType) usize {
@@ -200,17 +210,9 @@ pub const DBType = union(enum) {
             },
             .arr => |a| if (@typeInfo(T) != .pointer)
                 false
-            else if (a.count == 1)
-                checkType(
-                    .{ .base = a.base },
-                    @typeInfo(T).pointer.child,
-                )
             else
                 checkType(
-                    .{ .arr = .{
-                        .base = a.base,
-                        .count = a.count - 1,
-                    } },
+                    a.child(),
                     @typeInfo(T).pointer.child,
                 ),
         };

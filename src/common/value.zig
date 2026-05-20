@@ -120,6 +120,7 @@ pub const Value = union(enum) {
     text: Text,
     boolean: bool,
     uuid: uuid.Uuid,
+    array: []Value,
     null: void,
 
     pub const ReadError = error{
@@ -217,7 +218,39 @@ pub const Value = union(enum) {
             .text => |s| try writer.print("\"{s}\"", .{s.text()}),
             .boolean => |b| try writer.print("{}", .{b}),
             .uuid => |u| try writer.print("{s}", .{&uuid.urn.serialize(u)}),
+            .array => |a| {
+                try writer.writeByte('[');
+                for (a, 0..) |v, i| {
+                    if (i > 0)
+                        try writer.writeAll(", ");
+                    try v.format(writer);
+                }
+                try writer.writeByte(']');
+            },
             .null => try writer.writeAll("NULL"),
+        }
+    }
+
+    /// Format the Value as string.
+    pub fn formatForClient(
+        self: Value,
+        writer: *std.Io.Writer,
+    ) std.Io.Writer.Error!void {
+        switch (self) {
+            .boolean => |b| try writer.writeByte(if (b) 't' else 'f'),
+            .int => |x| try writer.print("{}", .{x}),
+            .text => |s| try writer.writeAll(s.text()),
+            .uuid => |u| try writer.writeAll(&uuid.urn.serialize(u)),
+            .null => {},
+            .array => |a| {
+                try writer.writeByte('[');
+                for (a, 0..) |v, i| {
+                    if (i > 0)
+                        try writer.writeAll(", ");
+                    try v.formatForClient(writer);
+                }
+                try writer.writeByte(']');
+            },
         }
     }
 
@@ -233,6 +266,13 @@ pub const Value = union(enum) {
                     2 + std.math.log10_int(@as(u64, @intCast(-x)));
             },
             .text => |s| return s.len(),
+            .array => |a| {
+                var count = a.len * 2; // 2 for [] + 2 for each comma
+                for (a) |v| {
+                    count += v.calcTextWidth();
+                }
+                return count;
+            },
             .boolean => return 1,
             .uuid => return 36,
             .null => return 0,
@@ -242,6 +282,7 @@ pub const Value = union(enum) {
     pub fn read(
         r: *std.Io.Reader,
         dbtype: t.DBType,
+        alloc: std.mem.Allocator,
     ) ReadError!Value {
         switch (dbtype) {
             .base => |base| switch (base) {
@@ -258,7 +299,13 @@ pub const Value = union(enum) {
                 .nulltype => return .null,
                 .text, .long_text, .dbtype => return .{ .text = try Text.read(r) },
             },
-            .arr => @panic("TODO: Array type"),
+            .arr => |arr| {
+                const size = try r.takeLeb128(usize);
+                const data = alloc.alloc(Value, size) catch oom();
+                for (data) |*v|
+                    v.* = try read(r, arr.child(), alloc);
+                return .{ .array = data };
+            },
         }
     }
 
@@ -283,7 +330,11 @@ pub const Value = union(enum) {
                 .nulltype => unreachable,
                 .text, .long_text, .dbtype => try self.text.write(w),
             },
-            .arr => @panic("TODO: Array type"),
+            .arr => |arr| {
+                try w.writeLeb128(self.array.len);
+                for (self.array) |v|
+                    try v.write(arr.child(), w);
+            },
         }
     }
 
@@ -291,6 +342,11 @@ pub const Value = union(enum) {
         switch (self) {
             .int, .boolean, .null, .uuid => return self,
             .text => |text| return .{ .text = text.clone(alloc) },
+            .array => |arr| {
+                const new = alloc.dupe(Value, arr) catch oom();
+                for (new) |*v| v.* = v.clone(alloc);
+                return .{ .array = new };
+            },
         }
     }
 
@@ -298,6 +354,10 @@ pub const Value = union(enum) {
         switch (self) {
             .int, .boolean, .null, .uuid => {},
             .text => |text| text.deinit(alloc),
+            .array => |arr| {
+                for (arr) |v| v.deinit(alloc);
+                alloc.free(arr);
+            },
         }
     }
 
@@ -313,6 +373,10 @@ pub const Value = union(enum) {
                 .uint2,
                 .uint4,
                 .uint8,
+                => return std.math.order(
+                    @as(u64, @intCast(lhs.int)),
+                    @as(u64, @intCast(rhs.int)),
+                ),
                 .oid,
                 .serial,
                 .int1,
@@ -328,7 +392,14 @@ pub const Value = union(enum) {
                 .text, .long_text, .dbtype => return lhs.text.order(rhs.text),
                 .nulltype => unreachable,
             },
-            .arr => @panic("TODO: Array type"),
+            .arr => |arr| {
+                const prefix_len = @min(lhs.array.len, rhs.array.len);
+                for (lhs.array[0..prefix_len], rhs.array[0..prefix_len]) |l, r| {
+                    const o = order(l, r, arr.child());
+                    if (o != .eq) return o;
+                }
+                return std.math.order(lhs.array.len, rhs.array.len);
+            },
         }
     }
 
@@ -356,7 +427,14 @@ pub const Value = union(enum) {
                 .text, .long_text, .dbtype => return lhs.text.eql(rhs.text),
                 .nulltype => unreachable,
             },
-            .arr => @panic("TODO: Array type"),
+            .arr => |arr| {
+                if (lhs.array.len != rhs.array.len) return false;
+                for (lhs.array, rhs.array) |l, r| {
+                    if (!eql(l, r, arr.child()))
+                        return false;
+                }
+                return true;
+            },
         }
     }
 };
