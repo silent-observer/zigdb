@@ -65,7 +65,7 @@ pub const DBType = union(enum) {
     });
 
     pub const Array = struct {
-        count: u3,
+        count: u3 = 1,
         base: Base,
 
         pub fn child(self: Array) DBType {

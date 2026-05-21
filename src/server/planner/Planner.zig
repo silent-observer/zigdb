@@ -43,6 +43,8 @@ pub fn plan(p: *Planner, stmt: ast.Statement) *Plan.Statement {
     switch (stmt) {
         .create_table => return p.planCreateTable(stmt.create_table),
         .drop_table => return p.planDropTable(stmt.drop_table),
+        .create_index => return p.planCreateIndex(stmt.create_index),
+        .drop_index => return p.planDropIndex(stmt.drop_index),
         .select => return p.planSelect(stmt.select),
         .@"union" => return p.planUnion(stmt.@"union"),
         .delete => return p.planDelete(stmt.delete),
@@ -113,6 +115,34 @@ fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) *Plan.Statement {
     return p.make(Plan.Statement{ .drop_table = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
+    } });
+}
+
+/// Plan CREATE INDEX statement
+fn planCreateIndex(p: *Planner, stmt: ast.Statement.CreateIndex) *Plan.Statement {
+    // Build the column list for the new index
+    const columns = p.alloc.alloc(Plan.ColumnId, stmt.columns.len) catch oom();
+    for (stmt.columns, columns) |n, *id|
+        id.* = @intCast(n.id.?);
+
+    // Convert name to lowercase
+    const lower_name = std.ascii.allocLowerString(
+        p.alloc,
+        stmt.name.text,
+    ) catch oom();
+
+    // Make the statement node.
+    return p.make(Plan.Statement{ .create_index = .{
+        .name = lower_name,
+        .table = stmt.table.id.?,
+        .cols = columns,
+    } });
+}
+
+/// Plan DROP INDEX statement
+fn planDropIndex(p: *Planner, stmt: ast.Statement.DropIndex) *Plan.Statement {
+    return p.make(Plan.Statement{ .drop_index = .{
+        .index = stmt.name.id.?,
     } });
 }
 

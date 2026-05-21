@@ -20,12 +20,23 @@
 //! CREATE TABLE zdb_attrs (
 //!     attr_rel_id UINT4,  -- table id
 //!     attr_id     UINT4,  -- attribute id inside the table
-//!     attr_type   UINT4,  -- type if of the attribute
+//!     attr_type   TYPE,   -- type of the attribute
 //!     attr_name   TEXT,   -- attribute name
 //!     PRIMARY KEY (attr_rel_id, attr_id)
 //! );
-//! -- Arbitrary toast table (
-//!
+//! -- Indexes
+//! CREATE TABLE zdb_indexes (
+//!     index_id     UINT4 PRIMARY KEY, -- index id
+//!     index_rel_id UINT4,             -- table id of the index
+//!     index_name   TEXT,              -- index name
+//!     index_cols   UINT2[]            -- column ids of columns used for key
+//! );
+//! -- Arbitrary toast table
+//! CREATE TABLE *_toast (
+//!     toast_id   SERIAL,  -- id of the toasted value
+//!     toast_seq  UINT4,   -- sequential number of the slice
+//!     toast_data TEXT,    -- data in the slice
+//!     PRIMARY KEY (toast_id, toast_seq)
 //! );
 //! ```
 //!
@@ -42,6 +53,7 @@ const oom = common.oom;
 pub const TableId = enum(common.ids.TableId) {
     zdb_rels = 1,
     zdb_attrs = 2,
+    zdb_indexes = 3,
     // All tables after this one are not real
     start_fake_tables,
     // This is not actually catalog, simply a well-defined descriptor for
@@ -61,6 +73,11 @@ pub const SystemAttribute = enum {
     attr_id,
     attr_type,
     attr_name,
+    // zdb_indexes
+    index_id,
+    index_rel_id,
+    index_name,
+    index_cols,
     // toast_table
     toast_id,
     toast_seq,
@@ -126,6 +143,31 @@ const Tables: []const TableEntry = &.{
                 .id = .attr_name,
                 .db_type = .b(.text),
                 .t = common.Text,
+            },
+        },
+    },
+    TableEntry{
+        .id = .zdb_indexes,
+        .attrs = &.{
+            AttributeEntry{
+                .id = .index_id,
+                .db_type = .b(.oid),
+                .t = u32,
+            },
+            AttributeEntry{
+                .id = .index_rel_id,
+                .db_type = .b(.oid),
+                .t = u32,
+            },
+            AttributeEntry{
+                .id = .index_name,
+                .db_type = .b(.text),
+                .t = common.Text,
+            },
+            AttributeEntry{
+                .id = .index_cols,
+                .db_type = .{ .arr = .{ .base = .uint2 } },
+                .t = []common.Value,
             },
         },
     },

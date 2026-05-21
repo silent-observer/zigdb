@@ -13,6 +13,8 @@ pub const Statement = union(enum) {
     update: Update,
     create_table: CreateTable,
     drop_table: DropTable,
+    create_index: CreateIndex,
+    drop_index: DropIndex,
     truncate: Truncate,
     @"union": Union,
     begin: void,
@@ -71,7 +73,17 @@ pub const Statement = union(enum) {
         };
     };
 
+    pub const CreateIndex = struct {
+        name: Name,
+        table: Name,
+        columns: []Name,
+    };
+
     pub const DropTable = struct {
+        name: Name,
+    };
+
+    pub const DropIndex = struct {
         name: Name,
     };
 

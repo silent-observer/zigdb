@@ -53,7 +53,9 @@ pub fn init(alloc: std.mem.Allocator, cat: *catalog.Cache) TypeChecker {
 pub fn check(t: *TypeChecker, stmt: *ast.Statement) bool {
     switch (stmt.*) {
         .create_table => return true,
+        .create_index => return t.checkCreateIndex(&stmt.create_index),
         .drop_table => return t.checkDropTable(&stmt.drop_table),
+        .drop_index => return t.checkDropIndex(&stmt.drop_index),
         .select => return t.checkSelect(&stmt.select),
         .@"union" => return t.checkUnion(&stmt.@"union"),
         .delete => return t.checkDelete(&stmt.delete),
@@ -83,6 +85,27 @@ fn findTable(t: *TypeChecker, name: *ast.Name) Error!catalog.Entry(.zdb_rels) {
     } else {
         // If not found, emit error
         t.addError("Unknown table \"{s}\"", .{name.text});
+        return Error.UnknownName;
+    }
+}
+
+/// Finds an index by its name
+fn findIndex(t: *TypeChecker, name: *ast.Name) Error!catalog.Entry(.zdb_indexes) {
+    // Scan through the catalog
+    var scanner = t.cat.catalog.zdb_indexes.scanTextIgnoreCase(
+        .index_name,
+        name.text,
+        &.{},
+        &.{},
+    );
+    const index = scanner.next();
+    if (index) |entry| {
+        name.id = entry.index_id;
+        // If found, return it
+        return entry;
+    } else {
+        // If not found, emit error
+        t.addError("Unknown index \"{s}\"", .{name.text});
         return Error.UnknownName;
     }
 }
@@ -126,9 +149,25 @@ pub fn findAttribute(
     return result;
 }
 
+/// Check CREATE INDEX statement
+fn checkCreateIndex(t: *TypeChecker, stmt: *ast.Statement.CreateIndex) bool {
+    _ = t.findTable(&stmt.table) catch return false;
+    const descr = t.cat.descr.getPtr(stmt.table.id.?).?;
+    for (stmt.columns) |*col_name| {
+        _ = t.findAttribute(descr, col_name, stmt.table) catch return false;
+    }
+    return true;
+}
+
 /// Check DROP TABLE statement
 fn checkDropTable(t: *TypeChecker, stmt: *ast.Statement.DropTable) bool {
     _ = t.findTable(&stmt.name) catch return false;
+    return true;
+}
+
+/// Check DROP INDEX statement
+fn checkDropIndex(t: *TypeChecker, stmt: *ast.Statement.DropIndex) bool {
+    _ = t.findIndex(&stmt.name) catch return false;
     return true;
 }
 

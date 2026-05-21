@@ -131,11 +131,21 @@ pub const Value = union(enum) {
 
     /// Obtain comptime-known type from a Value.
     pub fn to(v: Value, comptime T: type) TypeError!T {
+        if (T == Value) return v;
+
         if (@typeInfo(T) == .optional) {
             if (v == .null)
                 return null
             else
                 return try v.to(@typeInfo(T).optional.child);
+        }
+
+        if (@typeInfo(T) == .pointer) {
+            // We do not support destructuring []T without allocators
+            if (T != []Value or v != .array)
+                return TypeError.InvalidType
+            else
+                return v.array;
         }
 
         switch (T) {
@@ -165,11 +175,22 @@ pub const Value = union(enum) {
 
     /// Obtain comptime-known type from a Value.
     pub fn from(comptime T: type, v: T, alloc: std.mem.Allocator) Value {
+        if (T == Value) return v;
+
         if (@typeInfo(T) == .optional) {
             if (v == null)
                 return .null
             else
                 return from(@typeInfo(T).optional.child, v.?, alloc);
+        }
+
+        if (@typeInfo(T) == .pointer) {
+            const E = @typeInfo(T).pointer.child;
+            const arr = alloc.alloc(Value, v.len) catch oom();
+            for (v, arr) |child_t, *child_val| {
+                child_val.* = from(E, child_t, alloc);
+            }
+            return .{ .array = arr };
         }
 
         return switch (T) {

@@ -541,12 +541,33 @@ fn parseValueList(p: *Parser) ![]ast.Expression {
     return exprs;
 }
 
-/// Parse a CREATE statement. Currently only CREATE TABLE supported.
+/// Parse a CREATE statement.
 /// ```
-/// Create = "CREATE" "TABLE" Name "(" CollaList(ColumnDefinition) ")" ";"
+/// Create = CreateTable
+///        | CreateIndex
 /// ```
 fn parseCreate(p: *Parser) ast.Statement {
     p.expectKeyword(.create) catch return .err;
+    const t = p.peek();
+    if (t.keyword()) |kw| switch (kw) {
+        .table => return p.parseCreateTable(),
+        .index => return p.parseCreateIndex(),
+        else => {},
+    };
+
+    p.addError(
+        t,
+        "Expected a statement but got \"CREATE {s}\"",
+        .{t.text(p.input)},
+    );
+    return .err;
+}
+
+/// Parse a CREATE TABLE statement.
+/// ```
+/// CreateTable = "CREATE" "TABLE" Name "(" CommaList(ColumnDefinition) ")" ";"
+/// ```
+fn parseCreateTable(p: *Parser) ast.Statement {
     p.expectKeyword(.table) catch return .err;
     const name = p.parseName() catch return .err;
     p.expectSymbol(.lparen) catch return .err;
@@ -563,6 +584,30 @@ fn parseCreate(p: *Parser) ast.Statement {
     } };
 }
 
+/// Parse a CREATE INDEX statement.
+/// ```
+/// CreateIndex = "CREATE" "INDEX" Name "ON" Name "(" CommaList(Name) ")" ";"
+/// ```
+fn parseCreateIndex(p: *Parser) ast.Statement {
+    p.expectKeyword(.index) catch return .err;
+    const name = p.parseName() catch return .err;
+    p.expectKeyword(.on) catch return .err;
+    const table = p.parseName() catch return .err;
+    p.expectSymbol(.lparen) catch return .err;
+    const columns =
+        p.parseCommaListErr(
+            ast.Name,
+            parseName,
+        ) catch return .err;
+    p.expectSymbol(.rparen) catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .{ .create_index = .{
+        .name = name,
+        .table = table,
+        .columns = columns,
+    } };
+}
+
 /// Parse a column definition for CREATE TABLE supported.
 /// ```
 /// ColumnDefinition = Name Type
@@ -573,16 +618,50 @@ fn parseColumnDefinition(p: *Parser) !ast.Statement.CreateTable.ColumnDefinition
     return .{ .name = name, .col_type = dbtype };
 }
 
-/// Parse a DROP statement. Currently only DROP TABLE supported.
+/// Parse a DROP statement.
 /// ```
-/// Drop = "DROP" "TABLE" Name ";"
+/// Drop = DropTable
+///      | DropIndex
 /// ```
 fn parseDrop(p: *Parser) ast.Statement {
     p.expectKeyword(.drop) catch return .err;
+    const t = p.peek();
+    if (t.keyword()) |kw| switch (kw) {
+        .table => return p.parseDropTable(),
+        .index => return p.parseDropIndex(),
+        else => {},
+    };
+
+    p.addError(
+        t,
+        "Expected a statement but got \"DROP {s}\"",
+        .{t.text(p.input)},
+    );
+    return .err;
+}
+
+/// Parse a DROP TABLE statement.
+/// ```
+/// DropTable = "DROP" "TABLE" Name ";"
+/// ```
+fn parseDropTable(p: *Parser) ast.Statement {
     p.expectKeyword(.table) catch return .err;
     const name = p.parseName() catch return .err;
     p.expectSymbol(.semi) catch return .err;
     return .{ .drop_table = .{
+        .name = name,
+    } };
+}
+
+/// Parse a DROP INDEX statement.
+/// ```
+/// DropIndex = "DROP" "INDEX" Name ";"
+/// ```
+fn parseDropIndex(p: *Parser) ast.Statement {
+    p.expectKeyword(.index) catch return .err;
+    const name = p.parseName() catch return .err;
+    p.expectSymbol(.semi) catch return .err;
+    return .{ .drop_index = .{
         .name = name,
     } };
 }

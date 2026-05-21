@@ -32,6 +32,8 @@ pub fn execute(
     return switch (stmt.*) {
         .create_table => try ddl.executeCreateTable(stmt.create_table, cxt),
         .drop_table => try ddl.executeDropTable(stmt.drop_table),
+        .create_index => try ddl.executeCreateIndex(stmt.create_index, cxt),
+        .drop_index => try ddl.executeDropIndex(stmt.drop_index),
         .insert => try modify.executeInsert(stmt.insert, cxt),
         .select => try executeSelect(stmt.select, cxt),
         .truncate => try modify.executeTruncate(stmt.truncate),

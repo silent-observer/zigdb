@@ -27,11 +27,14 @@ db_id: ids.DatabaseId,
 catalog: CatalogTables,
 /// Cache of TupleDescriptors of all tables in the database
 descr: std.array_hash_map.Auto(ids.TableId, TupleDescriptor),
+/// Cache of TupleDescriptors of all indexes in the database
+index_descr: std.array_hash_map.Auto(ids.TableId, TupleDescriptor),
 
 /// All catalog tables
 pub const CatalogTables = struct {
     zdb_rels: Table(tables.TableId.zdb_rels),
     zdb_attrs: Table(tables.TableId.zdb_attrs),
+    zdb_indexes: Table(tables.TableId.zdb_indexes),
     // Toast tables are not actually catalog
 };
 
@@ -44,6 +47,7 @@ pub fn init(
     const catalog: CatalogTables = .{
         .zdb_rels = .init(gpa, db_id),
         .zdb_attrs = .init(gpa, db_id),
+        .zdb_indexes = .init(gpa, db_id),
     };
     return CatalogCache{
         .db_id = db_id,
@@ -51,6 +55,7 @@ pub fn init(
         .storage_cache = storage_cache,
         .catalog = catalog,
         .descr = .empty,
+        .index_descr = .empty,
     };
 }
 
@@ -105,6 +110,24 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
         }
         // Put it in the cache
         self.descr.put(self.gpa, rel.rel_id, descr) catch oom();
+    }
+
+    // Scan the zdb_indexes table containing all the tables
+    var index_scanner: Table(tables.TableId.zdb_indexes).Scanner =
+        self.catalog.zdb_indexes.scan(&.{}, &.{});
+    while (index_scanner.next()) |index| {
+        // Get the original table descriptor
+        const table_descr = self.descr.getPtr(index.index_rel_id).?;
+        // Build the descriptor
+        var descr: TupleDescriptor = .empty;
+        for (index.index_cols) |col_id| {
+            descr.attrs.append(
+                self.gpa,
+                table_descr.attrs.items[@intCast(col_id.int)],
+            ) catch oom();
+        }
+        // Put it in the cache
+        self.descr.put(self.gpa, index.index_id, descr) catch oom();
     }
 }
 
@@ -462,6 +485,7 @@ pub fn build(self: *CatalogCache) !void {
     // Create the catalog tables
     try createRaw(self.storage_cache, self.db_id, .zdb_rels);
     try createRaw(self.storage_cache, self.db_id, .zdb_attrs);
+    try createRaw(self.storage_cache, self.db_id, .zdb_indexes);
 
     // Go through all the tables and fill zdb_rels
     for (std.enums.values(tables.TableId)) |id| {

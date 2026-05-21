@@ -53,6 +53,7 @@ pub const Token = struct {
         values,
         create,
         table,
+        index,
         show,
         tables,
         truncate,

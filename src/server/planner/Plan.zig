@@ -18,6 +18,8 @@ pub const Statement = union(enum) {
     update: Update,
     create_table: CreateTable,
     drop_table: DropTable,
+    create_index: CreateIndex,
+    drop_index: DropIndex,
     truncate: Truncate,
     begin: void,
     commit: void,
@@ -71,6 +73,20 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Optional toast table
         toast_table: ?ids.TableId,
+    };
+
+    pub const CreateIndex = struct {
+        /// Name of the index to create
+        name: []const u8,
+        /// Id of the table to attach it to
+        table: ids.TableId,
+        /// Column ids for index
+        cols: []ColumnId,
+    };
+
+    pub const DropIndex = struct {
+        /// Id of the index to be dropped
+        index: ids.TableId,
     };
 
     pub const Truncate = struct {
