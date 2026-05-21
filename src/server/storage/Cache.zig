@@ -194,6 +194,9 @@ pub fn upgrade(
     const prev_read_pins = status.read_pins.fetchSub(1, .acq_rel);
     std.debug.assert(prev_read_pins > 0);
     pinned_page.writeable = true;
+
+    // This page will need to be flushed
+    status.dirty = true;
 }
 
 /// Get a read-only page.

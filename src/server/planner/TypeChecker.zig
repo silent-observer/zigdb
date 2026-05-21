@@ -477,11 +477,11 @@ fn evalConstExpression(
                     return .{ .boolean = v };
                 },
                 .eq, .ne => { // =, <>
-                    const v = common.Value.eql(lhs, rhs, expr.t.?);
+                    const v = common.Value.eql(lhs, rhs, b.left.t.?);
                     return .{ .boolean = if (b.op == .eq) v else !v };
                 },
                 .lt, .gt, .le, .ge => { // <, >, <=, >=
-                    const o = common.Value.order(lhs, rhs, expr.t.?);
+                    const o = common.Value.order(lhs, rhs, b.left.t.?);
                     const v = switch (b.op) {
                         .lt => o.compare(.lt),
                         .gt => o.compare(.gt),

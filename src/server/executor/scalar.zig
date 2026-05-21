@@ -68,11 +68,11 @@ pub fn eval(scalar: *const Plan.ScalarNode, tuple: common.MemTuple, cxt: *Contex
                     return .{ .boolean = v };
                 },
                 .eq, .ne => {
-                    const v = common.Value.eql(lhs, rhs, scalar.dbtype);
+                    const v = common.Value.eql(lhs, rhs, b.left.dbtype);
                     return .{ .boolean = if (b.op == .eq) v else !v };
                 },
                 .lt, .gt, .le, .ge => {
-                    const o = common.Value.order(lhs, rhs, scalar.dbtype);
+                    const o = common.Value.order(lhs, rhs, b.left.dbtype);
                     const v = switch (b.op) {
                         .lt => o.compare(.lt),
                         .gt => o.compare(.gt),

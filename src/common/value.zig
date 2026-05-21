@@ -318,7 +318,7 @@ pub const Value = union(enum) {
                 .uuid => return .{ .int = @intCast(try r.takeInt(uuid.Uuid, .little)) },
                 .boolean => return .{ .boolean = try r.takeByte() != 0 },
                 .nulltype => return .null,
-                .text, .long_text, .dbtype => return .{ .text = try Text.read(r) },
+                .text, .long_text, .dbtype => return .{ .text = (try Text.read(r)).clone(alloc) },
             },
             .arr => |arr| {
                 const size = try r.takeLeb128(usize);
