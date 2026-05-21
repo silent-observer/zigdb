@@ -214,6 +214,17 @@ pub fn executeDropTable(stmt: Plan.Statement.DropTable) ![]const u8 {
         }
     }
 
+    // And drop all the dependent indexes
+    for (stmt.indexes) |index| {
+        var scan = s.catalog_cache.catalog.zdb_indexes.scan(
+            &.{.index_id},
+            &.{index.index},
+        );
+        _ = scan.next().?;
+        try scan.deleteLast(s.shared.storage_cache, s.current_tid.real);
+        std.debug.assert(scan.next() == null);
+    }
+
     // Update all descriptors in the catalog
     try s.catalog_cache.updateDescriptors();
 
@@ -232,6 +243,15 @@ pub fn executeCreateIndex(stmt: Plan.Statement.CreateIndex, cxt: *Context) ![]co
             .table = @intFromEnum(catalog.tables.TableId.zdb_indexes),
         } },
         .write,
+        s.thread_id,
+    );
+    // And a read lock on the table itself
+    try s.shared.lock_manager.lock(
+        .{ .table = .{
+            .db = s.db_id,
+            .table = stmt.table,
+        } },
+        .read,
         s.thread_id,
     );
     // Generate the next table id
@@ -262,7 +282,36 @@ pub fn executeCreateIndex(stmt: Plan.Statement.CreateIndex, cxt: *Context) ![]co
         .{ .db = s.db_id, .table = index_id },
     ).create();
 
-    return "CREATE INDEX";
+    // We might have to fill it with initial data
+    var scanner = try heap.Scanner.init(
+        s.shared.storage_cache,
+        .{ .db = s.db_id, .table = stmt.table },
+        s.catalog_cache.descr.getPtr(stmt.table).?,
+        cxt.snapshot,
+    );
+    var counter: usize = 0;
+    while (try scanner.next(cxt.alloc)) |tuple| {
+        var walker = try btree.Walker.init(
+            cxt.alloc,
+            s.shared.storage_cache,
+            .{
+                .db = s.db_id,
+                .table = index_id,
+            },
+            s.catalog_cache.index_descr.getPtr(index_id).?,
+        );
+
+        const key_vals = cxt.alloc.alloc(common.Value, stmt.cols.len) catch oom();
+        defer cxt.alloc.free(key_vals);
+        for (stmt.cols, key_vals) |i, *v|
+            v.* = tuple.values[i];
+
+        _ = try walker.search(key_vals);
+        try walker.insert(key_vals, tuple.ext.?.pos);
+        counter += 1;
+    }
+
+    return std.fmt.allocPrint(cxt.alloc, "CREATE INDEX {}", .{counter});
 }
 
 /// Execute DROP INDEX statement

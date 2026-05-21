@@ -109,12 +109,34 @@ fn findTable(p: *Planner, name: ast.Name) catalog.Entry(.zdb_rels) {
     return scanner.next().?;
 }
 
+fn findIndexesToUpdate(p: *Planner, table: ast.Name) []Plan.IndexInfo {
+    var result: std.ArrayList(Plan.IndexInfo) = .empty;
+    // Scan through the catalog
+    var scanner = p.cat.catalog.zdb_indexes.scan(
+        &.{.index_rel_id},
+        &.{table.id.?},
+    );
+    while (scanner.next()) |index| {
+        const cols = p.alloc.alloc(u16, index.index_cols.len) catch oom();
+        for (index.index_cols, cols) |v, *c|
+            c.* = v.to(u16) catch unreachable;
+
+        result.append(p.alloc, .{
+            .index = index.index_id,
+            .descr = p.cat.index_descr.getPtr(index.index_id).?,
+            .cols = cols,
+        }) catch oom();
+    }
+    return result.toOwnedSlice(p.alloc) catch oom();
+}
+
 /// Plan DROP TABLE statement
 fn planDropTable(p: *Planner, stmt: ast.Statement.DropTable) *Plan.Statement {
     const table = p.findTable(stmt.name);
     return p.make(Plan.Statement{ .drop_table = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
+        .indexes = p.findIndexesToUpdate(stmt.name),
     } });
 }
 
@@ -152,6 +174,7 @@ fn planTruncate(p: *Planner, stmt: ast.Statement.Truncate) *Plan.Statement {
     return p.make(Plan.Statement{ .truncate = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
+        .indexes = p.findIndexesToUpdate(stmt.name),
     } });
 }
 
@@ -223,6 +246,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     return p.make(Plan.Statement{ .insert = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
+        .indexes = p.findIndexesToUpdate(stmt.name),
         .root = root,
     } });
 }
@@ -391,6 +415,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
     return p.make(Plan.Statement{ .update = .{
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
+        .indexes = p.findIndexesToUpdate(stmt.name),
         .root = root,
         .cols = cols.toOwnedSlice(p.alloc) catch oom(),
         .vals = vals.toOwnedSlice(p.alloc) catch oom(),

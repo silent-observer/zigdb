@@ -96,6 +96,11 @@ pub fn create(self: BTreeIndex) storage.Error!void {
     header.writePage(page.page);
 }
 
+/// Truncation is actually equivalent to creating a new index table.
+pub fn truncate(self: BTreeIndex) !void {
+    try self.create();
+}
+
 /// Read the header of the BTreeIndex.
 pub fn readHeader(self: BTreeIndex) storage.Error!FileHeader {
     const page = try self.cache.get(.{

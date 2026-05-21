@@ -127,7 +127,7 @@ pub fn updateDescriptors(self: *CatalogCache) !void {
             ) catch oom();
         }
         // Put it in the cache
-        self.descr.put(self.gpa, index.index_id, descr) catch oom();
+        self.index_descr.put(self.gpa, index.index_id, descr) catch oom();
     }
 }
 

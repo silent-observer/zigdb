@@ -37,6 +37,8 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Optional toast table
         toast_table: ?ids.TableId,
+        /// Indexes that need to be updated
+        indexes: []IndexInfo,
         /// Source of the data
         root: *DataNode,
     };
@@ -53,6 +55,8 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Optional toast table
         toast_table: ?ids.TableId,
+        /// Indexes that need to be updated
+        indexes: []IndexInfo,
         /// Source of the data
         root: *DataNode,
         /// Columns that need updating
@@ -73,6 +77,8 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Optional toast table
         toast_table: ?ids.TableId,
+        /// Indexes that need to be updated
+        indexes: []IndexInfo,
     };
 
     pub const CreateIndex = struct {
@@ -94,6 +100,8 @@ pub const Statement = union(enum) {
         table: ids.TableId,
         /// Optional toast table
         toast_table: ?ids.TableId,
+        /// Indexes that need to be updated
+        indexes: []IndexInfo,
     };
 };
 
@@ -239,4 +247,11 @@ pub const ScalarNode = struct {
         func: catalog.functions.ScalarFunctionId,
         inputs: []ScalarNode,
     };
+};
+
+/// Info about index that needs to be updated
+pub const IndexInfo = struct {
+    index: ids.TableId,
+    descr: *const common.TupleDescriptor,
+    cols: []u16,
 };
