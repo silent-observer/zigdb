@@ -218,6 +218,8 @@ fn parseSelectUnion(p: *Parser) ast.Statement {
         sources.append(p.alloc, p.parseSelect()) catch oom();
     }
     p.expectSymbol(.semi) catch return .err;
+    if (sources.items.len == 1)
+        return sources.items[0];
     return .{ .@"union" = .{
         .stmts = sources.toOwnedSlice(p.alloc) catch oom(),
     } };
