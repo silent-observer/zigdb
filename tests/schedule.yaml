@@ -1,3 +1,4 @@
 test: basic
 test: locks
 test: joins
+test: indexes

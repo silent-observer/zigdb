@@ -6,6 +6,7 @@ const Context = @import("Context.zig");
 const Plan = @import("../planner.zig").Plan;
 const ddl = @import("ddl.zig");
 const modify = @import("modify.zig");
+const index_scan = @import("index_scan.zig");
 const full_scan = @import("full_scan.zig");
 const values = @import("values.zig");
 const project = @import("project.zig");
@@ -202,6 +203,7 @@ fn executeShowTable(table_id: common.ids.TableId, cxt: *Context) ![]const u8 {
 pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
     const r = switch (plan.action) {
         .full_scan => full_scan.init(plan, cxt),
+        .index_scan => index_scan.init(plan, cxt),
         .values => values.init(plan, cxt),
         .project => project.init(plan, cxt),
         .filter => filter.init(plan, cxt),
@@ -219,6 +221,7 @@ pub fn initDataNode(plan: *Plan.DataNode, cxt: *Context) Error!void {
 pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
     switch (plan.action) {
         .full_scan => return full_scan.deinit(plan, cxt),
+        .index_scan => return index_scan.deinit(plan, cxt),
         .values => return values.deinit(plan, cxt),
         .project => return project.deinit(plan, cxt),
         .filter => return filter.deinit(plan, cxt),
@@ -232,6 +235,7 @@ pub fn deinitDataNode(plan: *Plan.DataNode, cxt: *Context) void {
 pub fn rewindDataNode(plan: *Plan.DataNode) Error!void {
     const r = switch (plan.action) {
         .full_scan => full_scan.rewind(plan),
+        .index_scan => index_scan.rewind(plan),
         .values => values.rewind(plan),
         .project => project.rewind(plan),
         .filter => filter.rewind(plan),
@@ -249,6 +253,7 @@ pub fn rewindDataNode(plan: *Plan.DataNode) Error!void {
 pub fn execDataNode(plan: *Plan.DataNode, cxt: *Context) Error!?common.MemTuple {
     const r = switch (plan.action) {
         .full_scan => full_scan.next(plan, cxt),
+        .index_scan => index_scan.next(plan, cxt),
         .values => values.next(plan, cxt),
         .project => project.next(plan, cxt),
         .filter => filter.next(plan, cxt),

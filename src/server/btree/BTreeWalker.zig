@@ -54,14 +54,6 @@ pub fn init(
     };
 }
 
-fn order(lhs: []const Value, rhs: []const Value, descr: *const TupleDescriptor) std.math.Order {
-    for (lhs, rhs, descr.attrs.items) |l, r, att| {
-        const o = l.order(r, att.t);
-        if (o != .eq) return o;
-    }
-    return .eq;
-}
-
 pub fn search(self: *BTreeWalker, key: []const Value) IndexError!bool {
     self.closePage();
     var page_id = self.root_page_id;
@@ -86,7 +78,7 @@ pub fn search(self: *BTreeWalker, key: []const Value) IndexError!bool {
                 arena.allocator(),
             );
 
-            const o = order(
+            const o = Value.orderMany(
                 key,
                 page_key_data.values,
                 self.key_descr,
@@ -119,7 +111,7 @@ pub fn search(self: *BTreeWalker, key: []const Value) IndexError!bool {
                 arena.allocator(),
             );
 
-            const o = order(
+            const o = Value.orderMany(
                 key,
                 page_key_data.values,
                 self.key_descr,

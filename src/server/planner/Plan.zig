@@ -114,6 +114,7 @@ pub const DataNode = struct {
 
     pub const Action = union(enum) {
         full_scan: FullScan,
+        index_scan: IndexScan,
         values: Values,
         project: Project,
         filter: Filter,
@@ -125,6 +126,24 @@ pub const DataNode = struct {
         pub const FullScan = struct {
             /// Table to scan
             table: ids.TableId,
+        };
+
+        /// Performs an index scan of some table
+        pub const IndexScan = struct {
+            /// Table to scan
+            table: ids.TableId,
+            /// Index to scan
+            index: ids.TableId,
+            /// Descriptor of the index keys
+            index_descr: *const common.TupleDescriptor,
+            /// Key prefix to start from
+            lower: []common.Value,
+            /// Key prefix to end on
+            upper: []common.Value,
+            /// Is the start value inclusive?
+            lower_inclusive: bool,
+            /// Is the end value inclusive?
+            upper_inclusive: bool,
         };
 
         /// Returns rows defined in the query itself

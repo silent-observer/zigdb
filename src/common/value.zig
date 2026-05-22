@@ -424,6 +424,15 @@ pub const Value = union(enum) {
         }
     }
 
+    pub fn orderMany(lhs: []const Value, rhs: []const Value, descr: *const t.TupleDescriptor) std.math.Order {
+        const end = @min(lhs.len, rhs.len);
+        for (lhs[0..end], rhs[0..end], descr.attrs.items[0..end]) |l, r, att| {
+            const o = l.order(r, att.t);
+            if (o != .eq) return o;
+        }
+        return .eq;
+    }
+
     pub fn eql(lhs: Value, rhs: Value, dbtype: t.DBType) bool {
         if (lhs == .null and rhs == .null)
             return true;

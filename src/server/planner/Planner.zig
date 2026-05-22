@@ -746,9 +746,181 @@ fn addFullFilter(
     return node;
 }
 
+fn addIndexFilter(
+    p: *Planner,
+    node: *Plan.DataNode,
+    filter: StructuredCondition,
+    info: Plan.IndexInfo,
+) *Plan.DataNode {
+    if (!filter.always_true) {
+        const index_scan = &node.action.index_scan;
+        // Some of the conditions can't be used with an index, just AND them all
+        var and_cond: AndExpression = .{};
+        // All variable-variable conditions can't be used
+        for (filter.var_var_equality) |e|
+            and_cond.terms.append(p.alloc, e.original) catch oom();
+        for (filter.var_const_equality) |e| {
+            // Try find this in the bounds
+            const min_len = @min(index_scan.lower.len, index_scan.upper.len);
+            for (info.cols[0..min_len]) |attr_id| {
+                if (e.expr.name.id.? == attr_id) break;
+            } else and_cond.terms.append(p.alloc, e.original) catch oom();
+        }
+        for (filter.var_const_inequality) |e| {
+            // Try find this in the bounds
+            const max_len = @max(index_scan.lower.len, index_scan.upper.len);
+            for (info.cols[0..max_len]) |attr_id| {
+                if (e.expr.name.id.? == attr_id) break;
+            } else and_cond.terms.append(p.alloc, e.original) catch oom();
+        }
+        if (filter.extra) |e|
+            and_cond.terms.append(p.alloc, e) catch oom();
+        const cond = and_cond.finalize(p.alloc);
+
+        if (cond) |c|
+            return p.addFilter(node, c);
+    }
+
+    return node;
+}
+
+fn rateIndex(req: DataSourceRequest, info: Plan.IndexInfo) usize {
+    if (req.filter.always_true or req.filter.always_false)
+        return 0;
+
+    var score: usize = 0;
+    outer: for (info.cols) |attr_i| {
+        for (req.filter.var_const_equality) |vce| {
+            if (vce.expr.name.id.? == attr_i) {
+                // Found equality, we can still do more
+                score += 1;
+                continue :outer;
+            }
+        }
+
+        var lower_bound = false;
+        var upper_bound = false;
+        for (req.filter.var_const_inequality) |vcie| {
+            if (vcie.expr.name.id.? == attr_i) {
+                switch (vcie.op) {
+                    .gt, .ge => lower_bound = true,
+                    .lt, .le => upper_bound = true,
+                }
+            }
+        }
+        if (lower_bound or upper_bound) {
+            // Found inequality/range, we are done with this index
+            score += 1;
+            break :outer;
+        }
+    }
+    return score;
+}
+
+fn constructIndexScan(
+    p: *Planner,
+    req: DataSourceRequest,
+    index: Plan.IndexInfo,
+) Plan.DataNode.Action.IndexScan {
+    var lower: std.ArrayList(common.Value) = .empty;
+    var upper: std.ArrayList(common.Value) = .empty;
+    var lower_inclusive = true;
+    var upper_inclusive = true;
+
+    outer: for (index.cols) |attr_i| {
+        for (req.filter.var_const_equality) |vce| {
+            if (vce.expr.name.id.? == attr_i) {
+                // Found equality, we can still do more
+                lower.append(p.alloc, vce.val) catch oom();
+                upper.append(p.alloc, vce.val) catch oom();
+                continue :outer;
+            }
+        }
+
+        var lower_bound = false;
+        var upper_bound = false;
+        for (req.filter.var_const_inequality) |vcie| {
+            if (vcie.expr.name.id.? == attr_i) {
+                switch (vcie.op) {
+                    .ge, .gt => {
+                        // Already have some bound
+                        if (lower_bound) {
+                            const prev = lower.getLast();
+                            const o = vcie.val.order(prev, vcie.original.t.?);
+                            if (o == .gt) {
+                                lower.items[lower.items.len - 1] = vcie.val;
+                                lower_inclusive = vcie.op == .ge;
+                            } else if (o == .eq and lower_inclusive) {
+                                lower_inclusive = vcie.op == .ge;
+                            }
+                        } else {
+                            lower.append(p.alloc, vcie.val) catch oom();
+                            lower_bound = true;
+                            lower_inclusive = vcie.op == .ge;
+                        }
+                    },
+                    .le, .lt => {
+                        // Already have some bound
+                        if (upper_bound) {
+                            const prev = upper.getLast();
+                            const o = vcie.val.order(prev, vcie.original.t.?);
+                            if (o == .lt) {
+                                upper.items[upper.items.len - 1] = vcie.val;
+                                upper_inclusive = vcie.op == .le;
+                            } else if (o == .eq and upper_inclusive) {
+                                upper_inclusive = vcie.op == .le;
+                            }
+                        } else {
+                            upper.append(p.alloc, vcie.val) catch oom();
+                            upper_bound = true;
+                            upper_inclusive = vcie.op == .le;
+                        }
+                    },
+                }
+            }
+        }
+        if (lower_bound or upper_bound)
+            // Found inequality/range, we are done with this index
+            break :outer;
+    }
+
+    return .{
+        .table = req.source.u.table.name.id.?,
+        .index = index.index,
+        .index_descr = index.descr,
+        .lower = lower.toOwnedSlice(p.alloc) catch oom(),
+        .upper = upper.toOwnedSlice(p.alloc) catch oom(),
+        .lower_inclusive = lower_inclusive,
+        .upper_inclusive = upper_inclusive,
+    };
+}
+
 /// Plan a table scan node for a table.
 fn planTableScan(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
     const ds = req.source;
+    // Try to use index scan if we can
+    const indexes = p.findIndexesToUpdate(ds.u.table.name);
+    var best_index: ?Plan.IndexInfo = null;
+    var best_score: usize = 0;
+    for (indexes) |info| {
+        const score = rateIndex(req, info);
+        if (score > best_score) {
+            best_index = info;
+            best_score = score;
+        }
+    }
+
+    if (best_index) |info| {
+        const node = p.make(Plan.DataNode{
+            .descr = ds.t.?,
+            .action = .{
+                .index_scan = p.constructIndexScan(req, info),
+            },
+        });
+
+        return p.addIndexFilter(node, req.filter, info);
+    }
+
     const node = p.make(Plan.DataNode{
         .descr = ds.t.?,
         .action = .{ .full_scan = .{

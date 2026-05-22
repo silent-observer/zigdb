@@ -160,3 +160,10 @@ pub fn rewind(self: *HeapScanner) void {
     self.page_id = 1;
     self.tuple_index = 0;
 }
+
+pub fn seek(self: *HeapScanner, pos: common.MemTuple.Pos) void {
+    if (self.page_id != pos.page_id and self.page != null)
+        self.closePage();
+    self.page_id = pos.page_id;
+    self.tuple_index = pos.index;
+}
