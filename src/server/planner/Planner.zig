@@ -228,7 +228,7 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     }
 
     // Plan the VALUES data source
-    var root = p.planValues(stmt.values);
+    var root = p.planValues(.{ .source = stmt.values });
     // We always need a projection node to add extended fields
     {
         // Add the projection node on top of VALUES, if needed
@@ -251,11 +251,315 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     } });
 }
 
+const AndExpression = struct {
+    terms: std.ArrayList(*ast.Expression) = .empty,
+
+    fn finalize(self: AndExpression, alloc: std.mem.Allocator) ?*ast.Expression {
+        if (self.terms.items.len == 0) return null;
+
+        var lhs = self.terms.items[0];
+        for (self.terms.items[1..]) |rhs| {
+            const new = alloc.create(ast.Expression) catch oom();
+            new.* = .{
+                .t = .b(.boolean),
+                .u = .{ .binary = .{
+                    .left = lhs,
+                    .right = rhs,
+                    .op = .@"and",
+                } },
+            };
+            lhs = new;
+        }
+        return lhs;
+    }
+};
+
+const StructuredCondition = struct {
+    var_var_equality: []VarVarEquality,
+    var_const_equality: []VarConstEquality,
+    var_const_inequality: []VarConstInequality,
+    extra: ?*ast.Expression,
+    always_true: bool,
+    always_false: bool,
+
+    const empty = StructuredCondition{
+        .var_var_equality = &.{},
+        .var_const_equality = &.{},
+        .var_const_inequality = &.{},
+        .extra = null,
+        .always_true = false,
+        .always_false = false,
+    };
+
+    const empty_true = StructuredCondition{
+        .var_var_equality = &.{},
+        .var_const_equality = &.{},
+        .var_const_inequality = &.{},
+        .extra = null,
+        .always_true = true,
+        .always_false = false,
+    };
+
+    const empty_false = StructuredCondition{
+        .var_var_equality = &.{},
+        .var_const_equality = &.{},
+        .var_const_inequality = &.{},
+        .extra = null,
+        .always_true = false,
+        .always_false = true,
+    };
+
+    const VarVarEquality = struct {
+        original: *ast.Expression,
+        lhs: ast.Expression.Variable,
+        rhs: ast.Expression.Variable,
+    };
+
+    const VarConstEquality = struct {
+        original: *ast.Expression,
+        expr: ast.Expression.Variable,
+        val: common.Value,
+    };
+
+    const VarConstInequality = struct {
+        original: *ast.Expression,
+        expr: ast.Expression.Variable,
+        val: common.Value,
+        op: Op,
+        const Op = enum { lt, le, gt, ge };
+    };
+
+    const Builder = struct {
+        alloc: std.mem.Allocator,
+        var_var_equality: std.ArrayList(VarVarEquality),
+        var_const_equality: std.ArrayList(VarConstEquality),
+        var_const_inequality: std.ArrayList(VarConstInequality),
+        extra: AndExpression,
+        always_true: bool,
+        always_false: bool,
+
+        fn init(alloc: std.mem.Allocator) Builder {
+            return .{
+                .alloc = alloc,
+                .var_var_equality = .empty,
+                .var_const_equality = .empty,
+                .var_const_inequality = .empty,
+                .extra = .{},
+                .always_true = false,
+                .always_false = false,
+            };
+        }
+
+        fn toVarVarEq(cond: *ast.Expression) ?VarVarEquality {
+            switch (cond.u) {
+                .binary => |binary| switch (binary.op) {
+                    .eq => {
+                        if (binary.left.u == .variable and binary.right.u == .variable)
+                            return .{
+                                .original = cond,
+                                .lhs = binary.left.u.variable,
+                                .rhs = binary.right.u.variable,
+                            }
+                        else
+                            return null;
+                    },
+                    else => return null,
+                },
+                else => return null,
+            }
+        }
+
+        fn toVarConstEq(cond: *ast.Expression) ?VarConstEquality {
+            switch (cond.u) {
+                .variable => |v| return .{
+                    .original = cond,
+                    .expr = v,
+                    .val = .{ .boolean = true },
+                },
+                .unary => |u| switch (u.op) {
+                    .not => {
+                        if (u.expr.u == .variable)
+                            return .{
+                                .original = cond,
+                                .expr = u.expr.u.variable,
+                                .val = .{ .boolean = false },
+                            }
+                        else
+                            return null;
+                    },
+                    .null => {
+                        if (u.expr.u == .variable)
+                            return .{
+                                .original = cond,
+                                .expr = u.expr.u.variable,
+                                .val = .null,
+                            }
+                        else
+                            return null;
+                    },
+                    else => return null,
+                },
+                .binary => |binary| switch (binary.op) {
+                    .eq => {
+                        if (binary.left.u == .variable and binary.right.u == .value)
+                            return .{
+                                .original = cond,
+                                .expr = binary.left.u.variable,
+                                .val = binary.right.u.value,
+                            }
+                        else if (binary.right.u == .variable and binary.left.u == .value)
+                            return .{
+                                .original = cond,
+                                .expr = binary.right.u.variable,
+                                .val = binary.left.u.value,
+                            }
+                        else
+                            return null;
+                    },
+                    else => return null,
+                },
+                else => return null,
+            }
+        }
+
+        fn toVarConstIneq(cond: *ast.Expression) ?VarConstInequality {
+            switch (cond.u) {
+                .unary => |u| switch (u.op) {
+                    .not_null => {
+                        if (u.expr.u == .variable)
+                            return .{
+                                .original = cond,
+                                .expr = u.expr.u.variable,
+                                .val = .null,
+                                .op = .lt,
+                            }
+                        else
+                            return null;
+                    },
+                    else => return null,
+                },
+                .binary => |binary| switch (binary.op) {
+                    .lt, .gt, .le, .ge => {
+                        if (binary.left.u == .variable and binary.right.u == .value)
+                            return .{
+                                .original = cond,
+                                .expr = binary.left.u.variable,
+                                .val = binary.right.u.value,
+                                .op = switch (binary.op) {
+                                    .lt => .lt,
+                                    .le => .le,
+                                    .gt => .gt,
+                                    .ge => .ge,
+                                    else => unreachable,
+                                },
+                            }
+                        else if (binary.right.u == .variable and binary.left.u == .value)
+                            return .{
+                                .original = cond,
+                                .expr = binary.right.u.variable,
+                                .val = binary.left.u.value,
+                                .op = switch (binary.op) {
+                                    .lt => .gt,
+                                    .le => .ge,
+                                    .gt => .lt,
+                                    .ge => .le,
+                                    else => unreachable,
+                                },
+                            }
+                        else
+                            return null;
+                    },
+                    else => return null,
+                },
+                else => return null,
+            }
+        }
+
+        fn addCond(b: *Builder, cond: *ast.Expression) void {
+            if (cond.u == .binary and cond.u.binary.op == .@"and") {
+                b.addCond(cond.u.binary.left);
+                b.addCond(cond.u.binary.right);
+                return;
+            }
+
+            if (cond.u == .value) switch (cond.u.value) {
+                .null => {
+                    b.always_false = true;
+                    return;
+                },
+                .boolean => |boolean| {
+                    if (boolean)
+                        b.always_true = true
+                    else
+                        b.always_false = true;
+                    return;
+                },
+                else => unreachable,
+            };
+
+            if (toVarVarEq(cond)) |vve|
+                b.var_var_equality.append(b.alloc, vve) catch oom()
+            else if (toVarConstEq(cond)) |vce|
+                b.var_const_equality.append(b.alloc, vce) catch oom()
+            else if (toVarConstIneq(cond)) |vcie|
+                b.var_const_inequality.append(b.alloc, vcie) catch oom()
+            else
+                b.extra.terms.append(b.alloc, cond) catch oom();
+        }
+
+        fn finalize(b: *Builder) StructuredCondition {
+            if (b.always_false)
+                return .empty_false
+            else if (b.always_true)
+                return .empty_true;
+
+            return .{
+                .extra = b.extra.finalize(b.alloc),
+                .var_var_equality = b.var_var_equality.toOwnedSlice(b.alloc) catch oom(),
+                .var_const_equality = b.var_const_equality.toOwnedSlice(b.alloc) catch oom(),
+                .var_const_inequality = b.var_const_inequality.toOwnedSlice(b.alloc) catch oom(),
+                .always_false = false,
+                .always_true = false,
+            };
+        }
+    };
+
+    fn build(cond: *ast.Expression, alloc: std.mem.Allocator) StructuredCondition {
+        var b = Builder.init(alloc);
+        b.addCond(cond);
+        return b.finalize();
+    }
+};
+
+const DataSourceRequest = struct {
+    source: *const ast.DataSource,
+    filter: StructuredCondition = .empty_true,
+};
+
+fn addFilter(p: *Planner, node: *Plan.DataNode, cond: *ast.Expression) *Plan.DataNode {
+    return p.make(Plan.DataNode{
+        .descr = node.descr,
+        .action = .{ .filter = .{
+            .input = node,
+            .condition = p.make(p.planExpression(cond.*)),
+        } },
+    });
+}
+
 /// Plan SELECT statement
 fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
+    // Try to structure the condition
+    const cond: StructuredCondition = if (stmt.where) |where|
+        .build(where, p.alloc)
+    else
+        .empty_true;
+
     // Plan the data source for input
     const source = stmt.source;
-    const input_node = p.planDataSource(source);
+    const input_node = p.planDataSource(.{
+        .source = source,
+        .filter = cond,
+    });
 
     // List of scalar nodes for expressions
     var scalar_nodes =
@@ -286,18 +590,6 @@ fn planSelect(p: *Planner, stmt: ast.Statement.Select) *Plan.Statement {
 
     // This is the input data
     var root = input_node;
-    // Add a filter if we have a WHERE clause
-    if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*));
-
-        root = p.make(Plan.DataNode{
-            .descr = root.descr,
-            .action = .{ .filter = .{
-                .input = root,
-                .condition = expr,
-            } },
-        });
-    }
 
     // SELECT basically always needs a projection
     {
@@ -344,59 +636,45 @@ fn planUnion(p: *Planner, stmt: ast.Statement.Union) *Plan.Statement {
 
 /// Plan DELETE statement
 fn planDelete(p: *Planner, stmt: ast.Statement.Delete) *Plan.Statement {
+    // Try to structure the condition
+    const cond: StructuredCondition = if (stmt.where) |where|
+        .build(where, p.alloc)
+    else
+        .empty_true;
     // Plan the data source for input
     const full_descr = p.cat.descr.getPtr(stmt.name.id.?).?;
-    const input_node = p.planDataSource(&.{
-        .u = .{ .table = .{ .name = stmt.name } },
-        .t = full_descr,
+    const input_node = p.planDataSource(.{
+        .source = &.{
+            .u = .{ .table = .{ .name = stmt.name } },
+            .t = full_descr,
+        },
+        .filter = cond,
     });
-
-    // This is the input data
-    var root = input_node;
-    // Add a filter if we have a WHERE clause
-    if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*));
-
-        root = p.make(Plan.DataNode{
-            .descr = root.descr,
-            .action = .{ .filter = .{
-                .input = root,
-                .condition = expr,
-            } },
-        });
-    }
 
     // Make the statement node
     return p.make(Plan.Statement{ .delete = .{
         .table = stmt.name.id.?,
-        .root = root,
+        .root = input_node,
     } });
 }
 
 /// Plan UPDATE statement
 fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
+    // Try to structure the condition
+    const cond: StructuredCondition = if (stmt.where) |where|
+        .build(where, p.alloc)
+    else
+        .empty_true;
     // Plan the data source for input
     const table = p.findTable(stmt.name);
     const full_descr = p.cat.descr.getPtr(stmt.name.id.?).?;
-    const input_node = p.planDataSource(&.{
-        .u = .{ .table = .{ .name = stmt.name } },
-        .t = full_descr,
+    const input_node = p.planDataSource(.{
+        .source = &.{
+            .u = .{ .table = .{ .name = stmt.name } },
+            .t = full_descr,
+        },
+        .filter = cond,
     });
-
-    // This is the input data
-    var root = input_node;
-    // Add a filter if we have a WHERE clause
-    if (stmt.where) |condition| {
-        const expr = p.make(p.planExpression(condition.*));
-
-        root = p.make(Plan.DataNode{
-            .descr = root.descr,
-            .action = .{ .filter = .{
-                .input = root,
-                .condition = expr,
-            } },
-        });
-    }
 
     // Fill the SET data
     var cols = std.ArrayList(Plan.ColumnId)
@@ -416,7 +694,7 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
         .table = table.rel_id,
         .toast_table = table.rel_toast_id,
         .indexes = p.findIndexesToUpdate(stmt.name),
-        .root = root,
+        .root = input_node,
         .cols = cols.toOwnedSlice(p.alloc) catch oom(),
         .vals = vals.toOwnedSlice(p.alloc) catch oom(),
     } });
@@ -424,38 +702,76 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
 
 /// Plan a data source node.
 /// This is currently very simple because almost nothing is supported.
-fn planDataSource(p: *Planner, source: *const ast.DataSource) *Plan.DataNode {
-    switch (source.u) {
-        .table => return p.planFullScan(source),
-        .join => return p.planNestedLoop(source),
-        .values => return p.planValues(source),
-        .func => return p.planSRF(source),
+fn planDataSource(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    if (req.filter.always_false) {
+        return p.make(Plan.DataNode{
+            .descr = req.source.t.?,
+            .action = .{ .values = .{
+                .data = &.{},
+            } },
+        });
+    }
+
+    switch (req.source.u) {
+        .table => return p.planTableScan(req),
+        .join => return p.planNestedLoop(req),
+        .values => return p.planValues(req),
+        .func => return p.planSRF(req),
         .err => unreachable,
     }
 }
 
-/// Plan a full scan node for a table.
-fn planFullScan(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
-    return p.make(Plan.DataNode{
+fn addFullFilter(
+    p: *Planner,
+    node: *Plan.DataNode,
+    filter: StructuredCondition,
+) *Plan.DataNode {
+    if (!filter.always_true) {
+        // None of the conditions can be applied cleverly, just AND them all
+        var and_cond: AndExpression = .{};
+        for (filter.var_var_equality) |e|
+            and_cond.terms.append(p.alloc, e.original) catch oom();
+        for (filter.var_const_equality) |e|
+            and_cond.terms.append(p.alloc, e.original) catch oom();
+        for (filter.var_const_inequality) |e|
+            and_cond.terms.append(p.alloc, e.original) catch oom();
+        if (filter.extra) |e|
+            and_cond.terms.append(p.alloc, e) catch oom();
+        const cond = and_cond.finalize(p.alloc);
+
+        if (cond) |c|
+            return p.addFilter(node, c);
+    }
+
+    return node;
+}
+
+/// Plan a table scan node for a table.
+fn planTableScan(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    const ds = req.source;
+    const node = p.make(Plan.DataNode{
         .descr = ds.t.?,
         .action = .{ .full_scan = .{
             .table = ds.u.table.name.id.?,
         } },
     });
+
+    return p.addFullFilter(node, req.filter);
 }
 
 /// Plan a nested loop join.
-fn planNestedLoop(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
+fn planNestedLoop(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    const ds = req.source;
     // Plan children data sources
-    const lhs = p.planDataSource(ds.u.join.lhs);
-    const rhs = p.planDataSource(ds.u.join.rhs);
+    const lhs = p.planDataSource(.{ .source = ds.u.join.lhs });
+    const rhs = p.planDataSource(.{ .source = ds.u.join.rhs });
     // Plan the join condition
     const cond = if (ds.u.join.cond) |c|
         p.make(p.planExpression(c.*))
     else
         null;
 
-    return switch (ds.u.join.kind) {
+    const node = switch (ds.u.join.kind) {
         .cross => p.make(Plan.DataNode{
             .descr = ds.t.?,
             .action = .{ .nested_loop = .{
@@ -550,13 +866,13 @@ fn planNestedLoop(p: *Planner, ds: *const ast.DataSource) *Plan.DataNode {
             });
         },
     };
+
+    return p.addFullFilter(node, req.filter);
 }
 
 /// Plan a data source node for VALUES list
-fn planValues(
-    p: *Planner,
-    ds: *const ast.DataSource,
-) *Plan.DataNode {
+fn planValues(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    const ds = req.source;
     // The list of tuples in the VALUES
     var values_data =
         std.ArrayList(common.MemTuple).initCapacity(p.alloc, ds.u.values.data.len) catch oom();
@@ -575,32 +891,32 @@ fn planValues(
     }
 
     // Build the data source node
-    return p.make(Plan.DataNode{
+    const node = p.make(Plan.DataNode{
         .descr = ds.t.?,
         .action = .{ .values = .{
             .data = values_data.toOwnedSlice(p.alloc) catch oom(),
         } },
     });
+    return p.addFullFilter(node, req.filter);
 }
 
 /// Plan a data source node for a set returning function
-fn planSRF(
-    p: *Planner,
-    ds: *const ast.DataSource,
-) *Plan.DataNode {
+fn planSRF(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    const ds = req.source;
     // Plan the sub-expressions
     const children = p.alloc.alloc(Plan.ScalarNode, ds.u.func.inputs.len) catch oom();
     for (ds.u.func.inputs, children) |i, *o|
         o.* = p.planExpression(i);
 
     // Build the data source node
-    return p.make(Plan.DataNode{
+    const node = p.make(Plan.DataNode{
         .descr = ds.t.?,
         .action = .{ .func = .{
             .func = ds.u.func.func,
             .inputs = children,
         } },
     });
+    return p.addFullFilter(node, req.filter);
 }
 
 /// Plan the scalar node for an expression (in the context of some tuple descriptor).

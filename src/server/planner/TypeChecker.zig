@@ -409,7 +409,23 @@ fn checkUpdate(t: *TypeChecker, stmt: *ast.Statement.Update) bool {
 }
 
 /// Is the expression a constant?
+fn isNullExpression(expr: ast.Expression) bool {
+    switch (expr.u) {
+        .variable => return false,
+        .value => |v| return v == .null,
+        .unary => |u| switch (u.op) {
+            .not, .neg => return isNullExpression(u.expr.*),
+            .null, .not_null => return false,
+        },
+        .binary => |b| return isNullExpression(b.left.*) or isNullExpression(b.right.*),
+        .func => return false,
+        .err => unreachable,
+    }
+}
+
+/// Is the expression a constant?
 fn isConstExpression(expr: ast.Expression) bool {
+    if (isNullExpression(expr)) return true;
     switch (expr.u) {
         .variable => return false,
         .value => return true,
