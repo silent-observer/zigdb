@@ -251,9 +251,12 @@ fn planInsertValues(p: *Planner, stmt: ast.Statement.InsertValues) *Plan.Stateme
     } });
 }
 
+// An expression representing several terms ANDed together
+// For convenience
 const AndExpression = struct {
     terms: std.ArrayList(*ast.Expression) = .empty,
 
+    // Combine all the terms into a single expression
     fn finalize(self: AndExpression, alloc: std.mem.Allocator) ?*ast.Expression {
         if (self.terms.items.len == 0) return null;
 
@@ -274,14 +277,17 @@ const AndExpression = struct {
     }
 };
 
+/// A parsed condition, with interesting parts extracted.
+/// It is treated like all the parts ANDed together.
 const StructuredCondition = struct {
-    var_var_equality: []VarVarEquality,
-    var_const_equality: []VarConstEquality,
-    var_const_inequality: []VarConstInequality,
-    extra: ?*ast.Expression,
-    always_true: bool,
-    always_false: bool,
+    var_var_equality: []VarVarEquality, // Something like a = b
+    var_const_equality: []VarConstEquality, // Something like a = 10
+    var_const_inequality: []VarConstInequality, // Something like a >= 10
+    extra: ?*ast.Expression, // Part that doesn't fit the pattern
+    always_true: bool, // Condition is just TRUE
+    always_false: bool, // Condition is just FALSE
 
+    /// Empty condition, not valid by itself but a good start
     const empty = StructuredCondition{
         .var_var_equality = &.{},
         .var_const_equality = &.{},
@@ -291,6 +297,7 @@ const StructuredCondition = struct {
         .always_false = false,
     };
 
+    /// Condition that is always true
     const empty_true = StructuredCondition{
         .var_var_equality = &.{},
         .var_const_equality = &.{},
@@ -300,6 +307,7 @@ const StructuredCondition = struct {
         .always_false = false,
     };
 
+    /// Condition that is always false
     const empty_false = StructuredCondition{
         .var_var_equality = &.{},
         .var_const_equality = &.{},
@@ -309,18 +317,21 @@ const StructuredCondition = struct {
         .always_false = true,
     };
 
+    /// A condition of the form a = b (where a and b are variables)
     const VarVarEquality = struct {
         original: *ast.Expression,
         lhs: ast.Expression.Variable,
         rhs: ast.Expression.Variable,
     };
 
+    /// A condition of the form a = 10
     const VarConstEquality = struct {
         original: *ast.Expression,
         expr: ast.Expression.Variable,
         val: common.Value,
     };
 
+    /// A condition of the form a >= 10
     const VarConstInequality = struct {
         original: *ast.Expression,
         expr: ast.Expression.Variable,
@@ -329,6 +340,7 @@ const StructuredCondition = struct {
         const Op = enum { lt, le, gt, ge };
     };
 
+    /// Convenience struct to build a new StructuredCondition
     const Builder = struct {
         alloc: std.mem.Allocator,
         var_var_equality: std.ArrayList(VarVarEquality),
@@ -350,6 +362,7 @@ const StructuredCondition = struct {
             };
         }
 
+        /// Try to convert an expression into a form var = var
         fn toVarVarEq(cond: *ast.Expression) ?VarVarEquality {
             switch (cond.u) {
                 .binary => |binary| switch (binary.op) {
@@ -369,14 +382,17 @@ const StructuredCondition = struct {
             }
         }
 
+        /// Try to convert an expression into a form var = const
         fn toVarConstEq(cond: *ast.Expression) ?VarConstEquality {
             switch (cond.u) {
+                // Only boolean variables can appear here
                 .variable => |v| return .{
                     .original = cond,
                     .expr = v,
                     .val = .{ .boolean = true },
                 },
                 .unary => |u| switch (u.op) {
+                    // Only boolean variables can appear here
                     .not => {
                         if (u.expr.u == .variable)
                             return .{
@@ -387,6 +403,7 @@ const StructuredCondition = struct {
                         else
                             return null;
                     },
+                    // We consider IS NULL to be an equality comparison
                     .null => {
                         if (u.expr.u == .variable)
                             return .{
@@ -422,9 +439,12 @@ const StructuredCondition = struct {
             }
         }
 
+        /// Try to convert an expression into a form var >= const
         fn toVarConstIneq(cond: *ast.Expression) ?VarConstInequality {
             switch (cond.u) {
                 .unary => |u| switch (u.op) {
+                    // NULL is bigger than anything else in an ordering,
+                    // so we can use a < NULL for a IS NOT NULL
                     .not_null => {
                         if (u.expr.u == .variable)
                             return .{
@@ -475,13 +495,16 @@ const StructuredCondition = struct {
             }
         }
 
+        // Add a new term to the condition
         fn addCond(b: *Builder, cond: *ast.Expression) void {
+            // ANDed terms are added separately
             if (cond.u == .binary and cond.u.binary.op == .@"and") {
                 b.addCond(cond.u.binary.left);
                 b.addCond(cond.u.binary.right);
                 return;
             }
 
+            // Handle constants in the condition
             if (cond.u == .value) switch (cond.u.value) {
                 .null => {
                     b.always_false = true;
@@ -497,6 +520,7 @@ const StructuredCondition = struct {
                 else => unreachable,
             };
 
+            // Try converting to all types of conditions
             if (toVarVarEq(cond)) |vve|
                 b.var_var_equality.append(b.alloc, vve) catch oom()
             else if (toVarConstEq(cond)) |vce|
@@ -507,7 +531,9 @@ const StructuredCondition = struct {
                 b.extra.terms.append(b.alloc, cond) catch oom();
         }
 
+        // Obtain the final condition out of the builder
         fn finalize(b: *Builder) StructuredCondition {
+            // false has priority, because true AND false = false
             if (b.always_false)
                 return .empty_false
             else if (b.always_true)
@@ -524,6 +550,7 @@ const StructuredCondition = struct {
         }
     };
 
+    // Convert an expression into the structured form
     fn build(cond: *ast.Expression, alloc: std.mem.Allocator) StructuredCondition {
         var b = Builder.init(alloc);
         b.addCond(cond);
@@ -531,11 +558,13 @@ const StructuredCondition = struct {
     }
 };
 
+// A request for a filtered data source
 const DataSourceRequest = struct {
     source: *const ast.DataSource,
     filter: StructuredCondition = .empty_true,
 };
 
+// Add a filter on top of a node
 fn addFilter(p: *Planner, node: *Plan.DataNode, cond: *ast.Expression) *Plan.DataNode {
     return p.make(Plan.DataNode{
         .descr = node.descr,
@@ -700,9 +729,9 @@ fn planUpdate(p: *Planner, stmt: ast.Statement.Update) *Plan.Statement {
     } });
 }
 
-/// Plan a data source node.
-/// This is currently very simple because almost nothing is supported.
+/// Plan a data source node.d.
 fn planDataSource(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
+    // Special case for WHERE false
     if (req.filter.always_false) {
         return p.make(Plan.DataNode{
             .descr = req.source.t.?,
@@ -721,6 +750,7 @@ fn planDataSource(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
     }
 }
 
+/// Add a filter on all parts of the condition
 fn addFullFilter(
     p: *Planner,
     node: *Plan.DataNode,
@@ -746,6 +776,7 @@ fn addFullFilter(
     return node;
 }
 
+/// Add a filter on parts of the condition not covered by the index scan
 fn addIndexFilter(
     p: *Planner,
     node: *Plan.DataNode,
@@ -784,67 +815,69 @@ fn addIndexFilter(
     return node;
 }
 
+/// Rate how good the index is for filtering
 fn rateIndex(req: DataSourceRequest, info: Plan.IndexInfo) usize {
+    // If we don't need filtering at all, no need for an index
     if (req.filter.always_true or req.filter.always_false)
         return 0;
 
     var score: usize = 0;
+    // Go through indexed columns in order
     outer: for (info.cols) |attr_i| {
+        // Do we have an equality condition for this?
         for (req.filter.var_const_equality) |vce| {
             if (vce.expr.name.id.? == attr_i) {
-                // Found equality, we can still do more
+                // Found equality, we can still do more on other columns though
                 score += 1;
                 continue :outer;
             }
         }
 
-        var lower_bound = false;
-        var upper_bound = false;
+        // Try looking for inequality conditions
         for (req.filter.var_const_inequality) |vcie| {
             if (vcie.expr.name.id.? == attr_i) {
-                switch (vcie.op) {
-                    .gt, .ge => lower_bound = true,
-                    .lt, .le => upper_bound = true,
-                }
+                // Found inequality/range, we are done with this index
+                score += 1;
+                break :outer;
             }
-        }
-        if (lower_bound or upper_bound) {
-            // Found inequality/range, we are done with this index
-            score += 1;
-            break :outer;
         }
     }
     return score;
 }
 
+/// Construct the actual index scan node
 fn constructIndexScan(
     p: *Planner,
     req: DataSourceRequest,
     index: Plan.IndexInfo,
 ) Plan.DataNode.Action.IndexScan {
+    // The lower and upper bounds
     var lower: std.ArrayList(common.Value) = .empty;
     var upper: std.ArrayList(common.Value) = .empty;
     var lower_inclusive = true;
     var upper_inclusive = true;
 
+    // Go through indexed columns in order
     outer: for (index.cols) |attr_i| {
+        // Do we have an equality condition for this?
         for (req.filter.var_const_equality) |vce| {
             if (vce.expr.name.id.? == attr_i) {
-                // Found equality, we can still do more
+                // Found equality, we can still do more on other columns though
                 lower.append(p.alloc, vce.val) catch oom();
                 upper.append(p.alloc, vce.val) catch oom();
                 continue :outer;
             }
         }
 
+        // Try looking for inequality conditions
         var lower_bound = false;
         var upper_bound = false;
         for (req.filter.var_const_inequality) |vcie| {
             if (vcie.expr.name.id.? == attr_i) {
                 switch (vcie.op) {
                     .ge, .gt => {
-                        // Already have some bound
                         if (lower_bound) {
+                            // Already have some bound, try to improve it
                             const prev = lower.getLast();
                             const o = vcie.val.order(prev, vcie.original.t.?);
                             if (o == .gt) {
@@ -854,14 +887,15 @@ fn constructIndexScan(
                                 lower_inclusive = vcie.op == .ge;
                             }
                         } else {
+                            // Don't have bound, try to add it
                             lower.append(p.alloc, vcie.val) catch oom();
                             lower_bound = true;
                             lower_inclusive = vcie.op == .ge;
                         }
                     },
                     .le, .lt => {
-                        // Already have some bound
                         if (upper_bound) {
+                            // Already have some bound, try to improve it
                             const prev = upper.getLast();
                             const o = vcie.val.order(prev, vcie.original.t.?);
                             if (o == .lt) {
@@ -871,6 +905,7 @@ fn constructIndexScan(
                                 upper_inclusive = vcie.op == .le;
                             }
                         } else {
+                            // Don't have bound, try to add it
                             upper.append(p.alloc, vcie.val) catch oom();
                             upper_bound = true;
                             upper_inclusive = vcie.op == .le;
@@ -911,6 +946,7 @@ fn planTableScan(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
     }
 
     if (best_index) |info| {
+        // Found the index, construct the index scan
         const node = p.make(Plan.DataNode{
             .descr = ds.t.?,
             .action = .{
@@ -921,6 +957,7 @@ fn planTableScan(p: *Planner, req: DataSourceRequest) *Plan.DataNode {
         return p.addIndexFilter(node, req.filter, info);
     }
 
+    // No good index, just do a full scan
     const node = p.make(Plan.DataNode{
         .descr = ds.t.?,
         .action = .{ .full_scan = .{

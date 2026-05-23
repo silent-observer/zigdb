@@ -103,8 +103,8 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
             // Advance until we are past the block of equal values
             while (try state.index_walker.advanceForward()) {
                 // Fetch one tuple
-                const curr_compact = state.index_walker.curr().?;
-                const curr = try curr_compact.uncompact(
+                const curr_compact = try state.index_walker.curr();
+                const curr = try curr_compact.?.uncompact(
                     index_scan.index_descr,
                     cxt.alloc,
                 );
@@ -122,7 +122,7 @@ pub fn next(plan: *Plan.DataNode, cxt: *Context) !?common.MemTuple {
     }
 
     // Fetch one key from the index
-    const curr_compact = state.index_walker.curr();
+    const curr_compact = try state.index_walker.curr();
     if (curr_compact == null) return null;
     const curr = try curr_compact.?.uncompact(
         index_scan.index_descr,
