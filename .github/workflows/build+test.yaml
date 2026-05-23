@@ -1,0 +1,32 @@
+name: ZigDB Build and Test
+run-name: Building and Testing ZigDB on branch ${{ inputs.branch_name || github.ref_name }}
+on:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Target branch name'
+        required: true
+        default: 'main'
+        type: string
+jobs:
+  Build-and-Test:
+    runs-on: ubuntu-slim
+    steps:
+      - name: Install system dependencies
+        run: |
+          sudo curl -L https://zig.mirror.mschae23.de/zig/zig-x86_64-linux-0.16.0.tar.xz | \
+          sudo  tar -xJ -C /usr/local && \
+          sudo ln -s /usr/local/zig-x86_64-linux-0.16.0/zig /usr/local/bin/zig
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          ref: '${{ inputs.branch_name || github.ref_name }}'
+      - name: Build
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Unit tests
+        run: zig build test --summary all
+      - name: SQL Test
+        run: python3 ./src/test_runner.py
